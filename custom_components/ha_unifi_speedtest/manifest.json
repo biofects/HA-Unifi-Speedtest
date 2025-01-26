@@ -1,0 +1,10 @@
+{
+  "domain": "ha_unifi_speedtest",
+  "name": "HA Unifi Speedtest",
+  "version": "1.0.0",
+  "config_flow": true,
+  "documentation": "https://github.com/biofects/HA-Unifi-Speedtest",
+  "requirements": ["requests"],
+  "dependencies": [],
+  "codeowners": ["@biofects"]
+}

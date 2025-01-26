@@ -1,0 +1,22 @@
+{
+    "title": "UniFi Speed Test",
+    "config": {
+      "step": {
+        "user": {
+          "title": "Set up UniFi Speed Test",
+          "description": "Connect to your UniFi Controller to run speed tests and fetch their status.",
+          "data": {
+            "url": "Controller URL (e.g., https://192.168.1.1:8443)",
+            "username": "UniFi Username",
+            "password": "UniFi Password"
+          }
+        }
+      },
+      "error": {
+        "cannot_connect": "Cannot connect to the UniFi Controller. Please check the URL and credentials.",
+        "invalid_auth": "Invalid username or password. Please try again.",
+        "unknown": "Unexpected error occurred. Please try again."
+      }
+    }
+  }
+  

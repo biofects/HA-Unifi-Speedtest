@@ -1,0 +1,7 @@
+start_speed_test:
+  description: "Start a speed test on the UniFi network."
+  fields: {}
+
+get_speed_test_status:
+  description: "Retrieve the current status of the ongoing UniFi speed test."
+  fields: {}
