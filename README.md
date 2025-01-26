@@ -1,4 +1,4 @@
-# 🌐 UniFi Site Manager for Home Assistant
+# 🌐 UniFi Speedtest for Home Assistant
 
 ## 🔍 About
 
