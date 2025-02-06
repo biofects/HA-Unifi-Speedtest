@@ -1,9 +1,8 @@
 import requests
 import logging
-import json
 import urllib3
+from requests.exceptions import HTTPError
 
-# Suppress the InsecureRequestWarning
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 _LOGGER = logging.getLogger(__name__)
@@ -23,66 +22,47 @@ class UniFiAPI:
         response = self.session.post(login_endpoint, json=credentials, verify=self.verify_ssl)
         response.raise_for_status()
 
+    def _make_request(self, method, endpoint, **kwargs):
+        try:
+            response = method(endpoint, verify=self.verify_ssl, **kwargs)
+            response.raise_for_status()
+            return response
+        except HTTPError as e:
+            if e.response.status_code == 401:
+                _LOGGER.info("Token expired, attempting to refresh...")
+                self.login()
+                response = method(endpoint, verify=self.verify_ssl, **kwargs)
+                response.raise_for_status()
+                return response
+            raise
+
     def start_speed_test(self):
         endpoint = f"{self.url}/proxy/network/api/s/{self.site}/cmd/devmgr"
         payload = {"cmd": "speedtest"}
-        response = self.session.post(endpoint, json=payload, verify=self.verify_ssl)
-        response.raise_for_status()
+        self._make_request(self.session.post, endpoint, json=payload)
 
     def get_speed_test_status(self):
         endpoint = f"{self.url}/proxy/network/v2/api/site/{self.site}/speedtest"
         _LOGGER.debug(f"Requesting speed test data from: {endpoint}")
         
         try:
-            response = self.session.get(endpoint, verify=self.verify_ssl)
-            response.raise_for_status()
+            response = self._make_request(self.session.get, endpoint)
             data = response.json()
             
-            # Check if we have speed test data
             if 'data' in data and len(data['data']) > 0:
-                # Take the most recent speed test result (last item in the list)
                 latest_test = data['data'][-1]
-                
                 result = {
                     'download': latest_test.get('download_mbps', None),
                     'upload': latest_test.get('upload_mbps', None),
                     'ping': latest_test.get('latency_ms', None),
-                    'jitter': None  # Not present in this data structure
+                    'jitter': None
                 }
-                
                 _LOGGER.debug(f"Extracted speed test result: {result}")
                 return result
             
-            # Fallback if no data is found
             _LOGGER.warning("No speed test data found")
-            return {
-                'download': None,
-                'upload': None,
-                'ping': None,
-                'jitter': None
-            }
-        
-        except requests.exceptions.RequestException as e:
-            _LOGGER.error(f"Network error fetching speed test data: {e}")
-            return {
-                'download': None,
-                'upload': None,
-                'ping': None,
-                'jitter': None
-            }
-        except ValueError as e:
-            _LOGGER.error(f"JSON parsing error: {e}")
-            return {
-                'download': None,
-                'upload': None,
-                'ping': None,
-                'jitter': None
-            }
+            return {'download': None, 'upload': None, 'ping': None, 'jitter': None}
+            
         except Exception as e:
-            _LOGGER.error(f"Unexpected error fetching speed test data: {e}")
-            return {
-                'download': None,
-                'upload': None,
-                'ping': None,
-                'jitter': None
-            }
+            _LOGGER.error(f"Error fetching speed test data: {e}")
+            return {'download': None, 'upload': None, 'ping': None, 'jitter': None}
