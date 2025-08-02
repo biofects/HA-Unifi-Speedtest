@@ -17,11 +17,14 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback
 ) -> bool:
     """Set up the UniFi Speed Test sensors."""
+    _LOGGER.info("Setting up UniFi Speed Test sensors.")
     # Retrieve the API instance from hass.data
     api = hass.data[DOMAIN][config_entry.entry_id]
+    _LOGGER.info(f"API instance retrieved: {api}")
 
     async def async_update_data():
         """Fetch data from API."""
+        _LOGGER.info("Fetching data from API for sensor update.")
         return await hass.async_add_executor_job(api.get_speed_test_status)
 
     coordinator = DataUpdateCoordinator(
@@ -32,6 +35,7 @@ async def async_setup_entry(
         update_interval=timedelta(minutes=5)  # Adjust as needed
     )
 
+    _LOGGER.info("Coordinator created, refreshing config entry.")
     await coordinator.async_config_entry_first_refresh()
 
     sensors = [
@@ -39,8 +43,9 @@ async def async_setup_entry(
         UniFiSpeedTestSensor(coordinator, "Upload Speed", "upload"),
         UniFiSpeedTestSensor(coordinator, "Ping", "ping")
     ]
-
+    _LOGGER.info(f"Sensors created: {sensors}")
     async_add_entities(sensors)
+    _LOGGER.info("Entities added to Home Assistant.")
     return True
 
 class UniFiSpeedTestSensor(CoordinatorEntity):
@@ -49,6 +54,7 @@ class UniFiSpeedTestSensor(CoordinatorEntity):
         self._name = name
         self._data_key = data_key
         self._state = None
+        _LOGGER.info(f"Sensor initialized: {self._name} ({self._data_key})")
 
     @property
     def name(self) -> str:
@@ -60,7 +66,9 @@ class UniFiSpeedTestSensor(CoordinatorEntity):
 
     @property
     def state(self) -> StateType:
-        return self.coordinator.data.get(self._data_key) if self.coordinator.data else None
+        value = self.coordinator.data.get(self._data_key) if self.coordinator.data else None
+        _LOGGER.info(f"Getting state for {self._name}: {value}")
+        return value
 
     @property
     def unit_of_measurement(self) -> str:
@@ -73,8 +81,10 @@ class UniFiSpeedTestSensor(CoordinatorEntity):
     @property
     def device_info(self):
         """Return device information about this entity."""
-        return {
+        info = {
             "identifiers": {(DOMAIN, "unifi_speedtest")},
             "name": INTEGRATION_NAME,
             "manufacturer": "UniFi"
         }
+        _LOGGER.info(f"Device info for {self._name}: {info}")
+        return info

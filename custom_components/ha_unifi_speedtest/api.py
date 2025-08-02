@@ -6,9 +6,11 @@ from requests.exceptions import HTTPError
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 _LOGGER = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 class UniFiAPI:
     def __init__(self, url, username, password, site='default', verify_ssl=False):
+        _LOGGER.info(f"Initializing UniFiAPI: url={url}, site={site}, verify_ssl={verify_ssl}")
         self.url = url
         self.username = username
         self.password = password
@@ -19,12 +21,17 @@ class UniFiAPI:
     def login(self):
         login_endpoint = f"{self.url}/api/auth/login"
         credentials = {"username": self.username, "password": self.password}
+        _LOGGER.info(f"Logging in to UniFi Controller at {login_endpoint}")
         response = self.session.post(login_endpoint, json=credentials, verify=self.verify_ssl)
+        _LOGGER.info(f"Login response status: {response.status_code}")
         response.raise_for_status()
+        _LOGGER.info("Login successful.")
 
     def _make_request(self, method, endpoint, **kwargs):
+        _LOGGER.info(f"Making request to endpoint: {endpoint}")
         try:
             response = method(endpoint, verify=self.verify_ssl, **kwargs)
+            _LOGGER.info(f"Response status: {response.status_code}")
             response.raise_for_status()
             return response
         except HTTPError as e:
@@ -32,23 +39,25 @@ class UniFiAPI:
                 _LOGGER.info("Token expired, attempting to refresh...")
                 self.login()
                 response = method(endpoint, verify=self.verify_ssl, **kwargs)
+                _LOGGER.info(f"Response status after refresh: {response.status_code}")
                 response.raise_for_status()
                 return response
+            _LOGGER.error(f"HTTPError encountered: {e}")
             raise
 
     def start_speed_test(self):
         endpoint = f"{self.url}/proxy/network/api/s/{self.site}/cmd/devmgr"
         payload = {"cmd": "speedtest"}
+        _LOGGER.info(f"Starting speed test at endpoint: {endpoint}")
         self._make_request(self.session.post, endpoint, json=payload)
 
     def get_speed_test_status(self):
         endpoint = f"{self.url}/proxy/network/v2/api/site/{self.site}/speedtest"
-        _LOGGER.debug(f"Requesting speed test data from: {endpoint}")
-        
+        _LOGGER.info(f"Requesting speed test data from: {endpoint}")
         try:
             response = self._make_request(self.session.get, endpoint)
             data = response.json()
-            
+            _LOGGER.info(f"Speed test data received: {data}")
             if 'data' in data and len(data['data']) > 0:
                 latest_test = data['data'][-1]
                 result = {
@@ -57,12 +66,10 @@ class UniFiAPI:
                     'ping': latest_test.get('latency_ms', None),
                     'jitter': None
                 }
-                _LOGGER.debug(f"Extracted speed test result: {result}")
+                _LOGGER.info(f"Extracted speed test result: {result}")
                 return result
-            
             _LOGGER.warning("No speed test data found")
             return {'download': None, 'upload': None, 'ping': None, 'jitter': None}
-            
         except Exception as e:
             _LOGGER.error(f"Error fetching speed test data: {e}")
             return {'download': None, 'upload': None, 'ping': None, 'jitter': None}
