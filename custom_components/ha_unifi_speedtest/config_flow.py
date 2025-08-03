@@ -10,7 +10,8 @@ from .const import (
     CONF_USERNAME, 
     CONF_PASSWORD, 
     CONF_SITE, 
-    CONF_VERIFY_SSL
+    CONF_VERIFY_SSL,
+    CONF_CONTROLLER_TYPE
 )
 from .api import UniFiAPI
 
@@ -33,19 +34,26 @@ class UniFiSpeedTestConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     user_input[CONF_USERNAME], 
                     user_input[CONF_PASSWORD],
                     site=user_input.get(CONF_SITE, 'default'),
-                    verify_ssl=user_input.get(CONF_VERIFY_SSL, False)
+                    verify_ssl=user_input.get(CONF_VERIFY_SSL, False),
+                    controller_type=user_input.get(CONF_CONTROLLER_TYPE, 'udm')
                 )
                 _LOGGER.info("Attempting API login...")
                 await self.hass.async_add_executor_job(api.login)
                 _LOGGER.info("API login successful.")
+                
+                # Get controller info for the title
+                controller_info = api.get_controller_info()
+                controller_type_display = controller_info['type'].upper() if controller_info['type'] else 'UniFi'
+                
                 return self.async_create_entry(
-                    title=f"{INTEGRATION_NAME} ({user_input[CONF_URL]})", 
+                    title=f"{INTEGRATION_NAME} ({controller_type_display})", 
                     data={
                         CONF_URL: user_input[CONF_URL],
                         CONF_USERNAME: user_input[CONF_USERNAME],
                         CONF_PASSWORD: user_input[CONF_PASSWORD],
                         CONF_SITE: user_input.get(CONF_SITE, 'default'),
-                        CONF_VERIFY_SSL: user_input.get(CONF_VERIFY_SSL, False)
+                        CONF_VERIFY_SSL: user_input.get(CONF_VERIFY_SSL, False),
+                        CONF_CONTROLLER_TYPE: user_input.get(CONF_CONTROLLER_TYPE, 'udm')
                     }
                 )
             except Exception as e:
@@ -53,6 +61,7 @@ class UniFiSpeedTestConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "cannot_connect"
         else:
             _LOGGER.info("No user input yet, showing form.")
+        
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({
@@ -60,7 +69,8 @@ class UniFiSpeedTestConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_USERNAME): str,
                 vol.Required(CONF_PASSWORD): str,
                 vol.Optional(CONF_SITE, default='default'): str,
-                vol.Optional(CONF_VERIFY_SSL, default=False): bool
+                vol.Optional(CONF_VERIFY_SSL, default=False): bool,
+                vol.Optional(CONF_CONTROLLER_TYPE, default='udm'): vol.In(['udm', 'controller'])
             }),
             errors=errors
         )
@@ -95,6 +105,10 @@ class UniFiSpeedTestOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_VERIFY_SSL, 
                     default=self.config_entry.data.get(CONF_VERIFY_SSL, False)
-                ): bool
+                ): bool,
+                vol.Optional(
+                    CONF_CONTROLLER_TYPE,
+                    default=self.config_entry.data.get(CONF_CONTROLLER_TYPE, 'udm')
+                ): vol.In(['udm', 'controller'])
             })
         )

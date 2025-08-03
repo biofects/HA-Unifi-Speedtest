@@ -17,9 +17,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.data["username"], 
         entry.data["password"],
         site=entry.data.get("site", "default"),  # Default to 'default' if not specified
-        verify_ssl=entry.data.get("verify_ssl", False)  # Default to False for backward compatibility
+        verify_ssl=entry.data.get("verify_ssl", False),  # Default to False for backward compatibility
+        controller_type=entry.data.get("controller_type", "udm")  # Default to 'udm' for existing users
     )
-    _LOGGER.info(f"UniFiAPI instance created for site: {entry.data.get('site', 'default')}")
+    _LOGGER.info(f"UniFiAPI instance created for site: {entry.data.get('site', 'default')}, controller_type: {entry.data.get('controller_type', 'udm')}")
     await hass.async_add_executor_job(api.login)
     _LOGGER.info("API login completed.")
     hass.data[DOMAIN][entry.entry_id] = api
