@@ -11,7 +11,7 @@ logging.basicConfig(level=logging.INFO)
 class UniFiAPI:
     def __init__(self, url, username, password, site='default', verify_ssl=False, controller_type='udm'):
         _LOGGER.info(f"Initializing UniFiAPI: url={url}, site={site}, verify_ssl={verify_ssl}, controller_type={controller_type}")
-        self.url = url
+        self.url = url.rstrip('/')  # Remove trailing slash if present
         self.username = username
         self.password = password
         self.site = site
@@ -120,28 +120,39 @@ class UniFiAPI:
             _LOGGER.info(f"Controller Speed test data received: {data}")
             
             if 'data' in data and len(data['data']) > 0:
-                # Look for the health data that contains speed test info
-                health_data = data['data'][0]  # Usually the first item contains the speed test data
+                # Look for the 'www' subsystem which contains speed test info
+                www_data = None
+                for subsystem in data['data']:
+                    if subsystem.get('subsystem') == 'www':
+                        www_data = subsystem
+                        break
                 
-                # Extract values and convert to match UDM format
-                download_mbps = health_data.get('xput_down')
-                upload_mbps = health_data.get('xput_up') 
-                ping_ms = health_data.get('speedtest_ping')
-                
-                result = {
-                    'download': float(download_mbps) if download_mbps is not None else None,
-                    'upload': float(upload_mbps) if upload_mbps is not None else None,
-                    'ping': float(ping_ms) if ping_ms is not None else None,
-                    'jitter': None  # Controller health endpoint doesn't provide jitter
-                }
-                _LOGGER.info(f"Extracted Controller speed test result: {result}")
-                return result
+                if www_data:
+                    # Extract values and convert to match UDM format
+                    download_mbps = www_data.get('xput_down')
+                    upload_mbps = www_data.get('xput_up') 
+                    ping_ms = www_data.get('speedtest_ping')
+                    speedtest_status = www_data.get('speedtest_status')
+                    
+                    _LOGGER.info(f"Found www subsystem data: download={download_mbps}, upload={upload_mbps}, ping={ping_ms}, status={speedtest_status}")
+                    
+                    result = {
+                        'download': float(download_mbps) if download_mbps is not None else None,
+                        'upload': float(upload_mbps) if upload_mbps is not None else None,
+                        'ping': float(ping_ms) if ping_ms is not None else None,
+                        'jitter': None,  # Controller health endpoint doesn't provide jitter
+                        'status': speedtest_status
+                    }
+                    _LOGGER.info(f"Extracted Controller speed test result: {result}")
+                    return result
+                else:
+                    _LOGGER.warning("No 'www' subsystem found in health data")
             
             _LOGGER.warning("No Controller speed test data found")
-            return {'download': None, 'upload': None, 'ping': None, 'jitter': None}
+            return {'download': None, 'upload': None, 'ping': None, 'jitter': None, 'status': None}
         except Exception as e:
             _LOGGER.error(f"Error fetching Controller speed test data: {e}")
-            return {'download': None, 'upload': None, 'ping': None, 'jitter': None}
+            return {'download': None, 'upload': None, 'ping': None, 'jitter': None, 'status': None}
 
     def get_controller_info(self):
         """Get information about the controller type and version"""
