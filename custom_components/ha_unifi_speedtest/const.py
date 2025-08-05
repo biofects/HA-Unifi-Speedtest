@@ -8,6 +8,7 @@ CONF_USERNAME = "username"
 CONF_PASSWORD = "password"
 CONF_SITE = "site"
 CONF_VERIFY_SSL = "verify_ssl"
+CONF_CONTROLLER_TYPE = "controller_type"
 
 # Service names
 SERVICE_START_SPEED_TEST = "start_speed_test"
