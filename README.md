@@ -147,6 +147,61 @@ entities:
     name: Ping
 ```
 
+# HA UniFi Speedtest v1.3.0 - Update Notes
+
+## 🆕 What's New in v1.3.0
+
+### ✅ **Fixed Unit Display**
+- Speed test units now properly display as `Mbit/s` (instead of `Mbps`) to match Home Assistant standards
+- Ping measurements continue to display as `ms`
+
+### ✅ **UDM Pro Support Enhanced** 
+- **Fixed 403 Forbidden errors** when triggering speed tests on UDM Pro
+- Added proper CSRF token handling for UDM Pro API authentication
+- UDM Pro now supports **automatic speed test triggering** via API
+
+### ✅ **Automatic Speed Tests**
+- **Hourly Speed Tests**: Automatically runs speed tests every hour on both UDM Pro and traditional UniFi Controllers
+- **Initial Test on Startup**: Runs a speed test 1 minute after Home Assistant starts
+- **Regular Data Updates**: Checks for new results every 5 minutes
+
+### ✅ **Manual Speed Test Button**
+Add this button to your dashboard for on-demand speed tests:
+
+```yaml
+show_name: true
+show_icon: true
+type: button
+name: Start Speed Test
+icon: mdi:speedometer
+tap_action:
+  action: call-service
+  service: ha_unifi_speedtest.start_speed_test
+```
+
+## 📊 Available Sensors
+
+- **UniFi Speed Test Download Speed** - Download speed in `Mbit/s`
+- **UniFi Speed Test Upload Speed** - Upload speed in `Mbit/s`  
+- **UniFi Speed Test Ping** - Latency in `ms`
+
+## 🔧 Compatibility
+
+- ✅ **UDM Pro / UDM SE / Cloud Key** - Full support with automatic speed test triggering
+- ✅ **Traditional UniFi Controller Software** - Full support
+- ✅ **Both controller types** get fresh speed test data every hour automatically
+
+## 🚀 Quick Setup
+
+1. **Install Integration**: Add via HACS or copy files to `custom_components/ha_unifi_speedtest/`
+2. **Configure**: Settings → Devices & Services → Add Integration → "HA Unifi Speedtest"
+3. **Enter Details**: Your UniFi controller URL, username, password, and controller type
+4. **Done!**: Sensors will appear automatically with hourly speed tests
+
+---
+
+*The integration now works seamlessly with both UDM Pro and traditional UniFi Controllers, providing regular speed test data with proper Home Assistant unit standards.*
+
 ## 🔧 Troubleshooting
 
 ### Common Issues
