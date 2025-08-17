@@ -243,4 +243,3 @@ class UniFiAPI:
             'site': self.site,
             'url': self.url
         }
-
