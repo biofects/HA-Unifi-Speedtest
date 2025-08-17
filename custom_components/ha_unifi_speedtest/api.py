@@ -67,17 +67,99 @@ class UniFiAPI:
     def start_speed_test(self):
         """Start speed test on the appropriate controller type"""
         if self.controller_type == 'udm':
-            _LOGGER.warning("UDM Pro speed test not supported via API - please use UniFi Network web interface")
-            raise Exception("UDM Pro speed test not supported via API")
+            self._start_speed_test_udm()
         else:
             self._start_speed_test_controller()
+
+    def _get_csrf_token(self):
+        """Get CSRF token from the UDM Pro interface"""
+        try:
+            # Try to get CSRF token from login response or a status endpoint
+            status_endpoint = f"{self.url}/proxy/network/api/s/{self.site}/stat/health"
+            response = self.session.get(status_endpoint, verify=self.verify_ssl)
+            csrf_token = response.headers.get('X-Csrf-Token') or response.headers.get('x-csrf-token')
+            if csrf_token:
+                _LOGGER.info("CSRF token obtained from response headers")
+                return csrf_token
+                
+            # Alternative: try to extract from cookies
+            for cookie in self.session.cookies:
+                if 'csrf' in cookie.name.lower():
+                    _LOGGER.info("CSRF token obtained from cookies")
+                    return cookie.value
+                    
+            _LOGGER.warning("No CSRF token found")
+            return None
+        except Exception as e:
+            _LOGGER.warning(f"Failed to get CSRF token: {e}")
+            return None
+
+    def _start_speed_test_udm(self):
+        """Start speed test on UDM Pro"""
+        endpoint = f"{self.url}/proxy/network/api/s/{self.site}/cmd/devmgr/speedtest"
+        _LOGGER.info(f"Starting UDM Pro speed test at endpoint: {endpoint}")
+        
+        # Get CSRF token
+        csrf_token = self._get_csrf_token()
+        
+        # Prepare headers to match browser request
+        headers = {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json, text/plain, */*',
+            'Origin': self.url,
+            'Referer': f"{self.url}/",
+        }
+        
+        # Add CSRF token if available
+        if csrf_token:
+            headers['X-Csrf-Token'] = csrf_token
+            _LOGGER.info("Added CSRF token to request headers")
+        
+        # Try with empty JSON payload (most likely based on content-length presence)
+        try:
+            _LOGGER.info(f"Attempting UDM Pro speed test with headers: {headers}")
+            response = self._make_request(
+                self.session.post, 
+                endpoint, 
+                json={},  # Empty JSON object
+                headers=headers
+            )
+            data = response.json()
+            _LOGGER.info(f"UDM Pro speed test response: {data}")
+            _LOGGER.info("UDM Pro speed test started successfully")
+        except Exception as e:
+            _LOGGER.error(f"Failed to start UDM Pro speed test: {e}")
+            # If CSRF token was used and failed, try without it
+            if csrf_token:
+                _LOGGER.info("Retrying without CSRF token...")
+                headers.pop('X-Csrf-Token', None)
+                try:
+                    response = self._make_request(
+                        self.session.post,
+                        endpoint,
+                        json={},
+                        headers=headers
+                    )
+                    data = response.json()
+                    _LOGGER.info(f"UDM Pro speed test response (no CSRF): {data}")
+                    _LOGGER.info("UDM Pro speed test started successfully")
+                except Exception as e2:
+                    _LOGGER.error(f"Failed UDM Pro speed test even without CSRF: {e2}")
+                    raise
+            else:
+                raise
 
     def _start_speed_test_controller(self):
         """Start speed test on traditional controller"""
         endpoint = f"{self.url}/api/s/{self.site}/cmd/devmgr"
         payload = {"cmd": "speedtest"}
         _LOGGER.info(f"Starting Controller speed test at endpoint: {endpoint}")
-        self._make_request(self.session.post, endpoint, json=payload)
+        try:
+            self._make_request(self.session.post, endpoint, json=payload)
+            _LOGGER.info("Controller speed test started successfully")
+        except Exception as e:
+            _LOGGER.error(f"Failed to start Controller speed test: {e}")
+            raise
 
     def get_speed_test_status(self):
         """Get speed test status from the appropriate controller type"""
