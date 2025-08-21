@@ -622,3 +622,4 @@ class UniFiAPI:
             'last_login': self._last_login.isoformat() if self._last_login else None,
             'failed_login_count': self._failed_login_count
         }
+
