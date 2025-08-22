@@ -1,28 +1,46 @@
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import async_get_current_platform
+from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.helpers import config_validation as cv
+import voluptuous as vol
 import logging
 
+from .const import DOMAIN, INTEGRATION_NAME, SERVICE_START_SPEED_TEST, SERVICE_GET_SPEED_TEST_STATUS, CONF_SCHEDULE_INTERVAL, CONF_ENABLE_SCHEDULING
 from .api import UniFiAPI
-from .const import DOMAIN, INTEGRATION_NAME
 
 _LOGGER = logging.getLogger(__name__)
 
+# Service schema for start_speed_test
+START_SPEED_TEST_SCHEMA = vol.Schema({
+    vol.Optional("config_entry_id"): cv.string,
+})
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up the HA Unifi Speedtest integration from a config entry."""
-    _LOGGER.info("Starting async_setup_entry for HA Unifi Speedtest integration.")
+    _LOGGER.info(f"Starting async_setup_entry for HA Unifi Speedtest integration: {entry.entry_id}")
+    
+    # Initialize data storage
     hass.data.setdefault(DOMAIN, {})
+    
+    # Initialize the API
     api = UniFiAPI(
         entry.data["url"], 
         entry.data["username"], 
         entry.data["password"],
-        site=entry.data.get("site", "default"),  # Default to 'default' if not specified
-        verify_ssl=entry.data.get("verify_ssl", False),  # Default to False for backward compatibility
-        controller_type=entry.data.get("controller_type", "udm")  # Default to 'udm' for existing users
+        site=entry.data.get("site", "default"),
+        verify_ssl=entry.data.get("verify_ssl", False),
+        controller_type=entry.data.get("controller_type", "udm")
     )
     _LOGGER.info(f"UniFiAPI instance created for site: {entry.data.get('site', 'default')}, controller_type: {entry.data.get('controller_type', 'udm')}")
-    await hass.async_add_executor_job(api.login)
-    _LOGGER.info("API login completed.")
+    
+    # Test the connection and login
+    try:
+        await hass.async_add_executor_job(api.login)
+        _LOGGER.info("API login completed successfully")
+    except Exception as e:
+        _LOGGER.error(f"Failed to connect to UniFi controller: {e}")
+        return False
+    
+    # Store the API instance
     hass.data[DOMAIN][entry.entry_id] = api
     _LOGGER.info("API instance stored in hass.data.")
 
@@ -30,32 +48,144 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, ["sensor"])
     _LOGGER.info("Forwarded entry setup to sensor platform.")
 
-    # Register services
-    async def start_speed_test(call):
-        _LOGGER.info("Service call: start_speed_test")
-        await hass.async_add_executor_job(api.start_speed_test)
+    # Register services (only register once for the domain)
+    if not hass.services.has_service(DOMAIN, SERVICE_START_SPEED_TEST):
+        async def start_speed_test(call: ServiceCall) -> None:
+            """Handle the start speed test service call."""
+            config_entry_id = call.data.get("config_entry_id")
+            
+            # If no specific config entry ID provided, use the first available
+            if config_entry_id is None:
+                if not hass.data[DOMAIN]:
+                    _LOGGER.error("No UniFi Speed Test integrations configured")
+                    return
+                config_entry_id = next(iter(hass.data[DOMAIN].keys()))
+                _LOGGER.info(f"No config_entry_id specified, using: {config_entry_id}")
+            
+            # Get the API instance
+            if config_entry_id not in hass.data[DOMAIN]:
+                _LOGGER.error(f"Config entry {config_entry_id} not found")
+                return
+                
+            api_instance = hass.data[DOMAIN][config_entry_id]
+            
+            # Get the tracker if it exists
+            tracker_key = f"{config_entry_id}_tracker"
+            tracker = hass.data[DOMAIN].get(tracker_key)
+            
+            _LOGGER.info(f"Manual speed test requested for config entry: {config_entry_id}")
+            
+            try:
+                # Record attempt if tracker exists (manual = False for automated parameter)
+                if tracker:
+                    tracker.record_attempt(automated=False)
+                
+                # Start the speed test
+                await hass.async_add_executor_job(api_instance.start_speed_test)
+                
+                # Record success if tracker exists
+                if tracker:
+                    tracker.record_success(automated=False)
+                    await tracker.async_save()  # Save after recording
+                
+                _LOGGER.info("Manual speed test started successfully")
+                
+            except Exception as e:
+                # Record failure if tracker exists
+                if tracker:
+                    tracker.record_failure(automated=False)
+                    await tracker.async_save()  # Save after recording
+                    
+                _LOGGER.error(f"Failed to start manual speed test: {e}")
+                raise
 
-    async def get_speed_test_status(call):
-        _LOGGER.info("Service call: get_speed_test_status")
-        status = await hass.async_add_executor_job(api.get_speed_test_status)
-        hass.states.async_set("sensor.unifi_speed_test_status", status)
-        _LOGGER.info(f"Speed test status set: {status}")
+        async def get_speed_test_status(call: ServiceCall) -> None:
+            """Handle the get speed test status service call."""
+            config_entry_id = call.data.get("config_entry_id")
+            
+            # If no specific config entry ID provided, use the first available
+            if config_entry_id is None:
+                if not hass.data[DOMAIN]:
+                    _LOGGER.error("No UniFi Speed Test integrations configured")
+                    return
+                config_entry_id = next(iter(hass.data[DOMAIN].keys()))
+            
+            # Get the API instance
+            if config_entry_id not in hass.data[DOMAIN]:
+                _LOGGER.error(f"Config entry {config_entry_id} not found")
+                return
+                
+            api_instance = hass.data[DOMAIN][config_entry_id]
+            
+            _LOGGER.info(f"Speed test status requested for config entry: {config_entry_id}")
+            try:
+                status = await hass.async_add_executor_job(api_instance.get_speed_test_status)
+                hass.states.async_set("sensor.unifi_speed_test_status", status)
+                _LOGGER.info(f"Speed test status retrieved: {status}")
+            except Exception as e:
+                _LOGGER.error(f"Failed to get speed test status: {e}")
 
-    hass.services.async_register(DOMAIN, "start_speed_test", start_speed_test)
-    hass.services.async_register(DOMAIN, "get_speed_test_status", get_speed_test_status)
-    _LOGGER.info("Services registered.")
+        # Register the services
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_START_SPEED_TEST,
+            start_speed_test,
+            schema=START_SPEED_TEST_SCHEMA,
+        )
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_GET_SPEED_TEST_STATUS,
+            get_speed_test_status,
+            schema=START_SPEED_TEST_SCHEMA,  # Same schema for consistency
+        )
+        _LOGGER.info("Services registered: start_speed_test, get_speed_test_status")
 
     return True
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    _LOGGER.info("Unloading config entry for HA Unifi Speedtest integration.")
+    _LOGGER.info(f"Unloading config entry for HA Unifi Speedtest integration: {entry.entry_id}")
+    
+    # Cancel any scheduled listeners
+    scheduled_listener_key = f"{entry.entry_id}_scheduled_listener"
+    if scheduled_listener_key in hass.data[DOMAIN]:
+        remove_listener = hass.data[DOMAIN][scheduled_listener_key]
+        if callable(remove_listener):
+            remove_listener()
+        del hass.data[DOMAIN][scheduled_listener_key]
+        _LOGGER.info("Removed scheduled speed test listener")
+    
+    initial_listener_key = f"{entry.entry_id}_initial_listener"
+    if initial_listener_key in hass.data[DOMAIN]:
+        remove_listener = hass.data[DOMAIN][initial_listener_key]
+        if callable(remove_listener):
+            remove_listener()
+        del hass.data[DOMAIN][initial_listener_key]
+        _LOGGER.info("Removed initial speed test listener")
+    
     # Unload the sensors
     unload_ok = await hass.config_entries.async_unload_platforms(entry, ["sensor"])
     
-    # Remove the data from hass.data
     if unload_ok:
-        hass.data.pop(DOMAIN, None)
+        # Clean up stored data for this specific entry
+        if entry.entry_id in hass.data[DOMAIN]:
+            del hass.data[DOMAIN][entry.entry_id]
+        
+        # Clean up tracker data for this entry
+        tracker_key = f"{entry.entry_id}_tracker"
+        if tracker_key in hass.data[DOMAIN]:
+            del hass.data[DOMAIN][tracker_key]
+        
+        # Remove services only if this was the last config entry
+        remaining_entries = [key for key in hass.data[DOMAIN].keys() 
+                           if not key.endswith('_tracker') and not key.endswith('_listener')]
+        if not remaining_entries:  # If no more config entries
+            if hass.services.has_service(DOMAIN, SERVICE_START_SPEED_TEST):
+                hass.services.async_remove(DOMAIN, SERVICE_START_SPEED_TEST)
+            if hass.services.has_service(DOMAIN, SERVICE_GET_SPEED_TEST_STATUS):
+                hass.services.async_remove(DOMAIN, SERVICE_GET_SPEED_TEST_STATUS)
+            _LOGGER.info("Removed services: start_speed_test, get_speed_test_status")
+        
         _LOGGER.info("Integration data removed from hass.data.")
     else:
         _LOGGER.warning("Failed to unload sensor platform.")

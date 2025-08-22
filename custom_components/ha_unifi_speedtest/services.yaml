@@ -1,7 +1,23 @@
 start_speed_test:
-  description: "Start a speed test on the UniFi network."
-  fields: {}
+  name: Start Speed Test
+  description: Manually start a speed test on the UniFi controller
+  fields:
+    config_entry_id:
+      name: Config Entry ID
+      description: The configuration entry ID for the specific UniFi controller (optional - will use first available if not specified)
+      required: false
+      example: "01234567890abcdef"
+      selector:
+        text:
 
 get_speed_test_status:
-  description: "Retrieve the current status of the ongoing UniFi speed test."
-  fields: {}
+  name: Get Speed Test Status
+  description: Retrieve the current speed test results from the UniFi controller
+  fields:
+    config_entry_id:
+      name: Config Entry ID
+      description: The configuration entry ID for the specific UniFi controller (optional - will use first available if not specified)
+      required: false
+      example: "01234567890abcdef"
+      selector:
+        text:
