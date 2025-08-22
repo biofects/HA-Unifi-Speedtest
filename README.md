@@ -35,7 +35,7 @@ If you find this plugin useful, please consider donating. Your support is greatl
 - **Speed Test Initiation**: Start speed tests remotely via Home Assistant (traditional controllers only)
 - **Home Assistant Services**: Integrate with automations and scripts
 
-## 🏗️ Supported Systems
+## 🏗 Supported Systems
 
 ### ✅ Traditional UniFi Controller Software
 - **Full functionality** including API-initiated speed tests
@@ -68,7 +68,7 @@ If you find this plugin useful, please consider donating. Your support is greatl
 2. Copy the `custom_components/ha_unifi_speedtest` directory to your Home Assistant's `custom_components` directory
 3. Restart Home Assistant
 
-## ⚙️ Configuration
+## ⚙ Configuration
 
 1. Go to Configuration > Integrations
 2. Click "+" to add a new integration
@@ -147,23 +147,17 @@ entities:
     name: Ping
 ```
 
-# HA UniFi Speedtest v1.3.0 - Update Notes
+# HA UniFi Speedtest v1.4.0 - Update Notes
 
-## 🆕 What's New in v1.3.0
+## 🆕 What's New in v1.4.0
+### ✅ **Added Poll control**
+Add Poll interval to config
 
-### ✅ **Fixed Unit Display**
-- Speed test units now properly display as `Mbit/s` (instead of `Mbps`) to match Home Assistant standards
-- Ping measurements continue to display as `ms`
+### ✅ **Fixed Compatability issues**
+Fixed compatability issues for UDM and Software based
 
-### ✅ **UDM Pro Support Enhanced** 
-- **Fixed 403 Forbidden errors** when triggering speed tests on UDM Pro
-- Added proper CSRF token handling for UDM Pro API authentication
-- UDM Pro now supports **automatic speed test triggering** via API
-
-### ✅ **Automatic Speed Tests**
-- **Hourly Speed Tests**: Automatically runs speed tests every hour on both UDM Pro and traditional UniFi Controllers
-- **Initial Test on Startup**: Runs a speed test 1 minute after Home Assistant starts
-- **Regular Data Updates**: Checks for new results every 5 minutes
+### ✅ **Adusted inital Run Time**
+Inital Run on Software was not correct updated that to prevent 5 min runs
 
 ### ✅ **Manual Speed Test Button**
 Add this button to your dashboard for on-demand speed tests:
@@ -240,10 +234,11 @@ Feel free to contribute to this project. Please read the contributing guidelines
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-## ⚖️ Disclaimer
+## ⚖ Disclaimer
 
 This integration is not affiliated with Ubiquiti Inc. or UI.com. All product names, logos, and brands are property of their respective owners.
 
 [releases-shield]: https://img.shields.io/github/release/tfam/ha_unifi_speedtest.svg
 [releases]: https://github.com/tfam/ha_unifi_speedtest/releases
 [maintenance-shield]: https://img.shields.io/maintenance/yes/2024.svg
+
