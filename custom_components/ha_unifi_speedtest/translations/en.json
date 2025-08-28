@@ -7,7 +7,13 @@
           "data": {
             "url": "Controller URL",
             "username": "Username",
-            "password": "Password"
+            "password": "Password",
+            "site": "Site Name",
+            "verify_ssl": "Verify SSL Certificate",
+            "controller_type": "Controller Type",
+            "enable_scheduling": "Enable Automatic Speed Tests",
+            "schedule_interval": "Speed Test Interval (minutes)",
+            "enable_multi_wan": "Enable Multi-WAN Detection"
           }
         }
       },
@@ -15,6 +21,21 @@
         "cannot_connect": "Cannot connect to the UniFi Controller.",
         "invalid_auth": "Invalid credentials.",
         "unknown": "An unknown error occurred."
+      }
+    },
+    "options": {
+      "step": {
+        "init": {
+          "title": "Configure UniFi Speed Test Options",
+          "data": {
+            "site": "Site Name",
+            "verify_ssl": "Verify SSL Certificate",
+            "controller_type": "Controller Type",
+            "enable_scheduling": "Enable Automatic Speed Tests",
+            "schedule_interval": "Speed Test Interval (minutes)",
+            "enable_multi_wan": "Enable Multi-WAN Detection"
+          }
+        }
       }
     },
     "services": {

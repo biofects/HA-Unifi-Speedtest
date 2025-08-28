@@ -8,7 +8,13 @@
           "data": {
             "url": "Controller URL (e.g., https://192.168.1.1:8443)",
             "username": "UniFi Username",
-            "password": "UniFi Password"
+            "password": "UniFi Password",
+            "site": "Site Name",
+            "verify_ssl": "Verify SSL Certificate",
+            "controller_type": "Controller Type",
+            "enable_scheduling": "Enable Automatic Speed Tests",
+            "schedule_interval": "Speed Test Interval (minutes)",
+            "enable_multi_wan": "Enable Multi-WAN Detection"
           }
         }
       },
@@ -16,6 +22,22 @@
         "cannot_connect": "Cannot connect to the UniFi Controller. Please check the URL and credentials.",
         "invalid_auth": "Invalid username or password. Please try again.",
         "unknown": "Unexpected error occurred. Please try again."
+      }
+    },
+    "options": {
+      "step": {
+        "init": {
+          "title": "Configure UniFi Speed Test Options",
+          "description": "Adjust settings for your UniFi Speed Test integration.",
+          "data": {
+            "site": "Site Name",
+            "verify_ssl": "Verify SSL Certificate",
+            "controller_type": "Controller Type",
+            "enable_scheduling": "Enable Automatic Speed Tests",
+            "schedule_interval": "Speed Test Interval (minutes)",
+            "enable_multi_wan": "Enable Multi-WAN Detection"
+          }
+        }
       }
     }
   }

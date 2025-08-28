@@ -13,14 +13,15 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 _LOGGER = logging.getLogger(__name__)
 
 class UniFiAPI:
-    def __init__(self, url, username, password, site='default', verify_ssl=False, controller_type='udm'):
-        _LOGGER.info(f"Initializing UniFiAPI: url={url}, site={site}, verify_ssl={verify_ssl}, controller_type={controller_type}")
+    def __init__(self, url, username, password, site='default', verify_ssl=False, controller_type='udm', enable_multi_wan=True):
+        _LOGGER.info(f"Initializing UniFiAPI: url={url}, site={site}, verify_ssl={verify_ssl}, controller_type={controller_type}, multi_wan={enable_multi_wan}")
         self.url = url.rstrip('/')  # Remove trailing slash if present
         self.username = username
         self.password = password
         self.site = site
         self.verify_ssl = verify_ssl
         self.controller_type = controller_type
+        self.enable_multi_wan = enable_multi_wan  # New option for dual WAN support
         self.session = requests.Session()
         # Set reasonable timeouts
         self.session.timeout = (10, 30)  # (connect timeout, read timeout)
@@ -446,17 +447,39 @@ class UniFiAPI:
         # Check if we should skip this request due to rate limiting
         if self._consecutive_403s > self._max_consecutive_403s:
             _LOGGER.warning("Skipping status request due to too many 403 errors")
-            return {'download': None, 'upload': None, 'ping': None}
+            if self.enable_multi_wan:
+                return {'wan_interfaces': [], 'total_interfaces': 0, 'primary_wan': None, 'multi_wan_enabled': True}
+            else:
+                return {'download': None, 'upload': None, 'ping': None}
         
         try:
-            if self.controller_type == 'udm':
-                return self._get_speed_test_status_udm()
+            if self.enable_multi_wan:
+                return self.get_speed_test_status_multi_wan()
             else:
-                return self._get_speed_test_status_controller()
+                return self.get_speed_test_status_legacy()
         except Exception as e:
             _LOGGER.error(f"Failed to get speed test status: {e}")
             # Return empty result instead of crashing
-            return {'download': None, 'upload': None, 'ping': None}
+            if self.enable_multi_wan:
+                return {'wan_interfaces': [], 'total_interfaces': 0, 'primary_wan': None, 'multi_wan_enabled': True}
+            else:
+                return {'download': None, 'upload': None, 'ping': None}
+
+    def get_speed_test_status_multi_wan(self):
+        """Get speed test status with support for multiple WAN interfaces"""
+        _LOGGER.debug("Getting speed test status with multi-WAN support")
+        
+        if self.controller_type == 'udm':
+            return self._get_speed_test_status_udm_multi_wan()
+        else:
+            return self._get_speed_test_status_controller_multi_wan()
+
+    def get_speed_test_status_legacy(self):
+        """Legacy method for backward compatibility"""
+        if self.controller_type == 'udm':
+            return self._get_speed_test_status_udm()
+        else:
+            return self._get_speed_test_status_controller()
 
     def _get_speed_test_status_udm(self):
         """Get speed test status from UDM Pro with enhanced error handling"""
@@ -576,6 +599,206 @@ class UniFiAPI:
         
         _LOGGER.debug("No Controller speed test data found from any endpoint")
         return {'download': None, 'upload': None, 'ping': None, 'status': None}
+
+    def _get_speed_test_status_udm_multi_wan(self):
+        """Get speed test status from UDM Pro/SE/Base with multi-WAN support"""
+        # Try multiple endpoints with platform-specific optimizations
+        endpoints_to_try = [
+            f"{self.url}/proxy/network/v2/api/site/{self.site}/speedtest",
+            f"{self.url}/proxy/network/api/s/{self.site}/stat/speedtest",
+            f"{self.url}/proxy/network/api/s/{self.site}/stat/health"
+        ]
+        
+        wan_interfaces = {}
+        
+        for endpoint in endpoints_to_try:
+            try:
+                _LOGGER.debug(f"Requesting UDM multi-WAN speed test data from: {endpoint}")
+                response = self._make_request(self.session.get, endpoint, max_retries=1)
+                data = response.json()
+                
+                if 'data' in data and len(data['data']) > 0:
+                    _LOGGER.debug(f"Processing {len(data['data'])} entries from {endpoint}")
+                    
+                    if 'speedtest' in endpoint or 'v2/api' in endpoint:
+                        # Direct speedtest endpoints - enhanced for all UDM variants
+                        for entry in data['data']:
+                            interface_name = entry.get('interface_name')
+                            wan_group = entry.get('wan_networkgroup', 'WAN')
+                            
+                            # Enhanced interface detection for different UDM models
+                            if not interface_name:
+                                # Fallback interface detection
+                                interface_name = entry.get('interface', 'unknown')
+                            
+                            if interface_name and interface_name != 'unknown':
+                                wan_key = f"{interface_name}_{wan_group}"
+                                
+                                wan_interfaces[wan_key] = {
+                                    'interface_name': interface_name,
+                                    'wan_networkgroup': wan_group,
+                                    'download': self._safe_float(entry.get('download_mbps')),
+                                    'upload': self._safe_float(entry.get('upload_mbps')),
+                                    'ping': self._safe_float(entry.get('latency_ms')),
+                                    'timestamp': entry.get('time'),
+                                    'id': entry.get('id'),
+                                    'source_endpoint': endpoint
+                                }
+                    else:
+                        # Health endpoint - enhanced for broader compatibility
+                        for subsystem in data['data']:
+                            subsystem_name = subsystem.get('subsystem', '')
+                            
+                            # Enhanced WAN detection for different platforms
+                            is_wan_subsystem = (
+                                'wan' in subsystem_name.lower() or 
+                                subsystem_name == 'www' or 
+                                'internet' in subsystem_name.lower() or
+                                subsystem_name.startswith('WAN') or
+                                'gateway' in subsystem_name.lower()
+                            )
+                            
+                            if is_wan_subsystem:
+                                # Enhanced interface extraction
+                                interface_name = (
+                                    subsystem.get('interface') or 
+                                    subsystem.get('wan_interface') or
+                                    subsystem.get('name') or
+                                    subsystem_name
+                                )
+                                
+                                wan_group = subsystem_name.upper() if subsystem_name != 'www' else 'WAN'
+                                wan_key = f"{interface_name}_{wan_group}"
+                                
+                                wan_interfaces[wan_key] = {
+                                    'interface_name': interface_name,
+                                    'wan_networkgroup': wan_group,
+                                    'download': self._safe_float(subsystem.get('xput_down')),
+                                    'upload': self._safe_float(subsystem.get('xput_up')),
+                                    'ping': self._safe_float(subsystem.get('speedtest_ping')),
+                                    'timestamp': None,
+                                    'id': None,
+                                    'status': subsystem.get('status', 'unknown'),
+                                    'source_endpoint': endpoint
+                                }
+                    
+                    if wan_interfaces:
+                        _LOGGER.info(f"Found {len(wan_interfaces)} WAN interface(s) on UDM platform: {list(wan_interfaces.keys())}")
+                        break
+                        
+            except Exception as e:
+                _LOGGER.debug(f"Failed to get multi-WAN data from {endpoint}: {e}")
+                continue
+        
+        # Enhanced result with platform detection
+        result = {
+            'wan_interfaces': list(wan_interfaces.values()),
+            'total_interfaces': len(wan_interfaces),
+            'primary_wan': list(wan_interfaces.keys())[0] if wan_interfaces else None,
+            'multi_wan_enabled': True,
+            'platform_type': 'udm',
+            'detection_method': 'multi_endpoint_scan'
+        }
+        
+        _LOGGER.debug(f"UDM Multi-WAN result: {result}")
+        return result
+
+    def _get_speed_test_status_controller_multi_wan(self):
+        """Get speed test status from traditional UniFi Controller with multi-WAN support"""
+        endpoints_to_try = [
+            f"{self.url}/api/s/{self.site}/stat/speedtest",
+            f"{self.url}/api/s/{self.site}/stat/health"
+        ]
+        
+        wan_interfaces = {}
+        
+        for endpoint in endpoints_to_try:
+            try:
+                _LOGGER.debug(f"Requesting Controller multi-WAN speed test data from: {endpoint}")
+                response = self._make_request(self.session.get, endpoint, max_retries=1)
+                data = response.json()
+                
+                if 'data' in data and len(data['data']) > 0:
+                    if 'speedtest' in endpoint:
+                        # Direct speedtest endpoint - enhanced for software controller
+                        for entry in data['data']:
+                            interface_name = entry.get('interface_name', entry.get('interface', 'unknown'))
+                            wan_group = entry.get('wan_networkgroup', entry.get('wan_group', 'WAN'))
+                            
+                            # Handle software controller variations
+                            if interface_name and interface_name != 'unknown':
+                                wan_key = f"{interface_name}_{wan_group}"
+                                
+                                wan_interfaces[wan_key] = {
+                                    'interface_name': interface_name,
+                                    'wan_networkgroup': wan_group,
+                                    'download': self._safe_float(entry.get('xput_down', entry.get('download_mbps'))),
+                                    'upload': self._safe_float(entry.get('xput_up', entry.get('upload_mbps'))),
+                                    'ping': self._safe_float(entry.get('speedtest_ping', entry.get('latency_ms'))),
+                                    'timestamp': entry.get('time'),
+                                    'id': entry.get('id'),
+                                    'source_endpoint': endpoint
+                                }
+                    else:
+                        # Health endpoint - enhanced for software controller compatibility
+                        for subsystem in data['data']:
+                            subsystem_name = subsystem.get('subsystem', '')
+                            
+                            # Enhanced WAN detection for software controller
+                            is_wan_subsystem = (
+                                'wan' in subsystem_name.lower() or 
+                                subsystem_name == 'www' or
+                                'internet' in subsystem_name.lower() or
+                                'gateway' in subsystem_name.lower() or
+                                subsystem_name.startswith('WAN')
+                            )
+                            
+                            if is_wan_subsystem:
+                                interface_name = (
+                                    subsystem.get('interface') or 
+                                    subsystem.get('wan_interface') or
+                                    subsystem_name
+                                )
+                                wan_group = subsystem_name.upper() if subsystem_name != 'www' else 'WAN'
+                                wan_key = f"{interface_name}_{wan_group}"
+                                
+                                wan_interfaces[wan_key] = {
+                                    'interface_name': interface_name,
+                                    'wan_networkgroup': wan_group,
+                                    'download': self._safe_float(subsystem.get('xput_down')),
+                                    'upload': self._safe_float(subsystem.get('xput_up')),
+                                    'ping': self._safe_float(subsystem.get('speedtest_ping')),
+                                    'timestamp': None,
+                                    'id': None,
+                                    'status': subsystem.get('speedtest_status', subsystem.get('status', 'unknown')),
+                                    'source_endpoint': endpoint
+                                }
+                    
+                    if wan_interfaces:
+                        _LOGGER.info(f"Found {len(wan_interfaces)} WAN interface(s) on Controller platform: {list(wan_interfaces.keys())}")
+                        break
+                        
+            except Exception as e:
+                _LOGGER.debug(f"Failed to get multi-WAN data from {endpoint}: {e}")
+                continue
+        
+        return {
+            'wan_interfaces': list(wan_interfaces.values()),
+            'total_interfaces': len(wan_interfaces),
+            'primary_wan': list(wan_interfaces.keys())[0] if wan_interfaces else None,
+            'multi_wan_enabled': True,
+            'platform_type': 'controller',
+            'detection_method': 'legacy_endpoint_scan'
+        }
+
+    def _safe_float(self, value):
+        """Safely convert value to float"""
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return None
 
     def get_controller_info(self):
         """Get information about the controller type and version"""
