@@ -73,6 +73,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 
             api_instance = hass.data[DOMAIN][config_entry_id]
             
+            # Debug logging to identify the issue
+            _LOGGER.debug(f"Retrieved API instance type: {type(api_instance)}")
+            _LOGGER.debug(f"API instance: {api_instance}")
+            
+            # Validate that we have the correct API instance
+            if not hasattr(api_instance, 'start_speed_test'):
+                _LOGGER.error(f"Invalid API instance retrieved. Type: {type(api_instance)}, Value: {api_instance}")
+                _LOGGER.error(f"Available data keys: {list(hass.data[DOMAIN].keys())}")
+                return
+            
             # Get the tracker if it exists
             tracker_key = f"{config_entry_id}_tracker"
             tracker = hass.data[DOMAIN].get(tracker_key)
