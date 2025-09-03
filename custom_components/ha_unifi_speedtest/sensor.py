@@ -12,7 +12,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, SensorStateClass
 
-from .const import DOMAIN, INTEGRATION_NAME, CONF_SCHEDULE_INTERVAL, CONF_ENABLE_SCHEDULING, CONF_POLLING_INTERVAL
+from .const import DOMAIN, INTEGRATION_NAME, CONF_SCHEDULE_INTERVAL, CONF_ENABLE_SCHEDULING, CONF_POLLING_INTERVAL, CONF_ENABLE_MULTI_WAN
 from .api import UniFiAPI
 
 _LOGGER = logging.getLogger(__name__)
@@ -178,13 +178,56 @@ async def async_setup_entry(
     _LOGGER.info("Coordinator created, refreshing config entry.")
     await coordinator.async_config_entry_first_refresh()
 
-    sensors = [
-        UniFiSpeedTestSensor(coordinator, "Download Speed", "download"),
-        UniFiSpeedTestSensor(coordinator, "Upload Speed", "upload"),
-        UniFiSpeedTestSensor(coordinator, "Ping", "ping"),
+    # Check if multi-WAN is enabled and create appropriate sensors
+    enable_multi_wan = config_entry.options.get(CONF_ENABLE_MULTI_WAN, 
+                                               config_entry.data.get(CONF_ENABLE_MULTI_WAN, True))
+    
+    sensors = []
+    
+    if enable_multi_wan:
+        # Check if we have multi-WAN data
+        coordinator_data = coordinator.data
+        if (coordinator_data and 
+            isinstance(coordinator_data, dict) and 
+            'multi_wan_enabled' in coordinator_data and 
+            coordinator_data.get('wan_interfaces')):
+            
+            # Create sensors for each WAN interface
+            wan_interfaces = coordinator_data['wan_interfaces']
+            _LOGGER.info(f"Creating sensors for {len(wan_interfaces)} WAN interface(s)")
+            
+            for i, wan_interface in enumerate(wan_interfaces, 1):
+                interface_name = wan_interface.get('interface_name', f'wan{i}')
+                wan_group = wan_interface.get('wan_networkgroup', f'WAN{i}')
+                
+                sensors.extend([
+                    UniFiSpeedTestSensorMultiWAN(coordinator, f"Download Speed {wan_group}", "download", interface_name, wan_group, i-1),
+                    UniFiSpeedTestSensorMultiWAN(coordinator, f"Upload Speed {wan_group}", "upload", interface_name, wan_group, i-1),
+                    UniFiSpeedTestSensorMultiWAN(coordinator, f"Ping {wan_group}", "ping", interface_name, wan_group, i-1),
+                ])
+        else:
+            # Fallback to legacy sensors if no multi-WAN data available
+            _LOGGER.info("Multi-WAN enabled but no multi-WAN data found, creating legacy sensors")
+            sensors.extend([
+                UniFiSpeedTestSensor(coordinator, "Download Speed", "download"),
+                UniFiSpeedTestSensor(coordinator, "Upload Speed", "upload"),
+                UniFiSpeedTestSensor(coordinator, "Ping", "ping"),
+            ])
+    else:
+        # Create legacy sensors
+        _LOGGER.info("Multi-WAN disabled, creating legacy sensors")
+        sensors.extend([
+            UniFiSpeedTestSensor(coordinator, "Download Speed", "download"),
+            UniFiSpeedTestSensor(coordinator, "Upload Speed", "upload"),
+            UniFiSpeedTestSensor(coordinator, "Ping", "ping"),
+        ])
+    
+    # Add common sensors
+    sensors.extend([
         SpeedTestRunsSensor(speed_test_tracker, "Speed Test Runs"),
-        UniFiAPIHealthSensor(api, "API Health")  # New sensor to monitor API health
-    ]
+        UniFiAPIHealthSensor(api, "API Health")
+    ])
+    
     _LOGGER.info(f"Sensors created: {[s.name for s in sensors]}")
     async_add_entities(sensors)
     _LOGGER.info("Entities added to Home Assistant.")
@@ -403,6 +446,114 @@ class UniFiSpeedTestSensor(CoordinatorEntity, SensorEntity):
         }
         _LOGGER.debug(f"Device info for {self._name}: {info}")
         return info
+
+
+class UniFiSpeedTestSensorMultiWAN(CoordinatorEntity, SensorEntity):
+    """Sensor for UniFi Speed Test measurements with multi-WAN support."""
+    
+    def __init__(self, coordinator, name, data_key, interface_name, wan_group, wan_index):
+        super().__init__(coordinator)
+        self._name = name
+        self._data_key = data_key
+        self._interface_name = interface_name
+        self._wan_group = wan_group
+        self._wan_index = wan_index
+        self._state = None
+        _LOGGER.info(f"Multi-WAN Sensor initialized: {self._name} ({self._data_key}) for {interface_name}/{wan_group}")
+
+    @property
+    def name(self) -> str:
+        return f"UniFi Speed Test {self._name}"
+
+    @property
+    def unique_id(self) -> str:
+        return f"{DOMAIN}_{self._data_key}_{self._interface_name}_{self._wan_group}"
+
+    @property
+    def state(self) -> StateType:
+        """Get the state from multi-WAN data structure."""
+        if not self.coordinator.data:
+            return None
+            
+        # Handle multi-WAN data structure
+        if ('wan_interfaces' in self.coordinator.data and 
+            self._wan_index < len(self.coordinator.data['wan_interfaces'])):
+            wan_data = self.coordinator.data['wan_interfaces'][self._wan_index]
+            value = wan_data.get(self._data_key)
+            _LOGGER.debug(f"Getting multi-WAN state for {self._name}: {value}")
+            return value
+            
+        # Fallback to legacy data structure
+        value = self.coordinator.data.get(self._data_key)
+        _LOGGER.debug(f"Getting fallback state for {self._name}: {value}")
+        return value
+
+    @property
+    def unit_of_measurement(self) -> str:
+        """Return the unit of measurement following Home Assistant standards."""
+        if self._data_key in ["download", "upload"]:
+            return "Mbit/s"
+        elif self._data_key == "ping":
+            return "ms"
+        return None
+
+    @property
+    def device_class(self) -> SensorDeviceClass | None:
+        """Return the device class for the sensor."""
+        if self._data_key in ["download", "upload"]:
+            return SensorDeviceClass.DATA_RATE
+        elif self._data_key == "ping":
+            return SensorDeviceClass.DURATION
+        return None
+
+    @property
+    def state_class(self) -> SensorStateClass | None:
+        """Return the state class for long-term statistics."""
+        return SensorStateClass.MEASUREMENT
+
+    @property
+    def suggested_display_precision(self) -> int | None:
+        """Return the suggested display precision."""
+        if self._data_key in ["download", "upload"]:
+            return 2
+        elif self._data_key == "ping":
+            return 1
+        return None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Return additional state attributes for multi-WAN sensors."""
+        attributes = {
+            "interface_name": self._interface_name,
+            "wan_networkgroup": self._wan_group,
+            "wan_number": self._wan_index + 1,
+        }
+        
+        # Add additional WAN interface data if available
+        if (self.coordinator.data and 
+            'wan_interfaces' in self.coordinator.data and 
+            self._wan_index < len(self.coordinator.data['wan_interfaces'])):
+            wan_data = self.coordinator.data['wan_interfaces'][self._wan_index]
+            
+            attributes.update({
+                "total_wan_interfaces": self.coordinator.data.get('total_interfaces', 1),
+                "is_primary_wan": wan_data.get('interface_name') == self.coordinator.data.get('primary_wan', '').split('_')[0],
+                "timestamp": wan_data.get('timestamp'),
+                "status": wan_data.get('status', 'unknown')
+            })
+        
+        return attributes
+
+    @property
+    def device_info(self):
+        """Return device information about this entity."""
+        return {
+            "identifiers": {(DOMAIN, f"unifi_speedtest_{self._wan_group}")},
+            "name": f"{INTEGRATION_NAME} {self._wan_group}",
+            "manufacturer": "UniFi",
+            "model": f"WAN Interface {self._interface_name}",
+            "via_device": (DOMAIN, "unifi_speedtest")
+        }
 
 
 class SpeedTestRunsSensor(SensorEntity):

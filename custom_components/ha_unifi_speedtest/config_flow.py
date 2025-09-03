@@ -15,9 +15,11 @@ from .const import (
     CONF_ENABLE_SCHEDULING,
     CONF_SCHEDULE_INTERVAL,
     CONF_POLLING_INTERVAL,
+    CONF_ENABLE_MULTI_WAN,
     DEFAULT_SCHEDULE_INTERVAL,
     DEFAULT_ENABLE_SCHEDULING,
-    DEFAULT_POLLING_INTERVAL
+    DEFAULT_POLLING_INTERVAL,
+    DEFAULT_ENABLE_MULTI_WAN
 )
 from .api import UniFiAPI
 
@@ -115,6 +117,7 @@ class UniFiSpeedTestConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     default=DEFAULT_SCHEDULE_INTERVAL,
                     description="Speed Test Interval (minutes)"
                 ): vol.All(int, vol.Range(min=15, max=1440)),  # 15 minutes to 24 hours
+                vol.Optional(CONF_ENABLE_MULTI_WAN, default=DEFAULT_ENABLE_MULTI_WAN, description="Enable Multi-WAN Detection"): bool,
             }),
             errors=errors,
             description_placeholders={
@@ -185,6 +188,8 @@ class UniFiSpeedTestOptionsFlow(config_entries.OptionsFlow):
                                                                  self.config_entry.data.get(CONF_SCHEDULE_INTERVAL, DEFAULT_SCHEDULE_INTERVAL))
         current_polling_interval = self.config_entry.options.get(CONF_POLLING_INTERVAL,
                                                                 self.config_entry.data.get(CONF_POLLING_INTERVAL, DEFAULT_POLLING_INTERVAL))
+        current_enable_multi_wan = self.config_entry.options.get(CONF_ENABLE_MULTI_WAN,
+                                                                self.config_entry.data.get(CONF_ENABLE_MULTI_WAN, DEFAULT_ENABLE_MULTI_WAN))
 
         _LOGGER.info("No options input yet, showing form.")
         
@@ -208,6 +213,7 @@ class UniFiSpeedTestOptionsFlow(config_entries.OptionsFlow):
                     default=current_schedule_interval,
                     description=f"Speed Test Interval (minutes) - Currently: {current_schedule_interval}"
                 ): vol.All(int, vol.Range(min=15, max=1440)),
+                vol.Optional(CONF_ENABLE_MULTI_WAN, default=current_enable_multi_wan, description="Enable Multi-WAN Detection"): bool,
             }),
             errors=errors,
             description_placeholders={

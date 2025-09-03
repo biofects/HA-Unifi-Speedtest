@@ -4,7 +4,7 @@ from homeassistant.helpers import config_validation as cv
 import voluptuous as vol
 import logging
 
-from .const import DOMAIN, INTEGRATION_NAME, SERVICE_START_SPEED_TEST, SERVICE_GET_SPEED_TEST_STATUS, CONF_SCHEDULE_INTERVAL, CONF_ENABLE_SCHEDULING
+from .const import DOMAIN, INTEGRATION_NAME, SERVICE_START_SPEED_TEST, SERVICE_GET_SPEED_TEST_STATUS, CONF_SCHEDULE_INTERVAL, CONF_ENABLE_SCHEDULING, CONF_ENABLE_MULTI_WAN
 from .api import UniFiAPI
 
 _LOGGER = logging.getLogger(__name__)
@@ -22,15 +22,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
     
     # Initialize the API
+    enable_multi_wan = entry.options.get(CONF_ENABLE_MULTI_WAN, 
+                                        entry.data.get(CONF_ENABLE_MULTI_WAN, True))
+    
     api = UniFiAPI(
         entry.data["url"], 
         entry.data["username"], 
         entry.data["password"],
         site=entry.data.get("site", "default"),
         verify_ssl=entry.data.get("verify_ssl", False),
-        controller_type=entry.data.get("controller_type", "udm")
+        controller_type=entry.data.get("controller_type", "udm"),
+        enable_multi_wan=enable_multi_wan
     )
-    _LOGGER.info(f"UniFiAPI instance created for site: {entry.data.get('site', 'default')}, controller_type: {entry.data.get('controller_type', 'udm')}")
+    _LOGGER.info(f"UniFiAPI instance created for site: {entry.data.get('site', 'default')}, controller_type: {entry.data.get('controller_type', 'udm')}, multi_wan: {enable_multi_wan}")
     
     # Test the connection and login
     try:
@@ -68,6 +72,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 return
                 
             api_instance = hass.data[DOMAIN][config_entry_id]
+            
+            # Debug logging to identify the issue
+            _LOGGER.debug(f"Retrieved API instance type: {type(api_instance)}")
+            _LOGGER.debug(f"API instance: {api_instance}")
+            
+            # Validate that we have the correct API instance
+            if not hasattr(api_instance, 'start_speed_test'):
+                _LOGGER.error(f"Invalid API instance retrieved. Type: {type(api_instance)}, Value: {api_instance}")
+                _LOGGER.error(f"Available data keys: {list(hass.data[DOMAIN].keys())}")
+                return
             
             # Get the tracker if it exists
             tracker_key = f"{config_entry_id}_tracker"

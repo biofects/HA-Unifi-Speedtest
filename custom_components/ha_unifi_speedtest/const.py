@@ -17,6 +17,7 @@ CONF_CONTROLLER_TYPE = "controller_type"
 CONF_ENABLE_SCHEDULING = "enable_scheduling"
 CONF_SCHEDULE_INTERVAL = "schedule_interval"
 CONF_POLLING_INTERVAL = "polling_interval"
+CONF_ENABLE_MULTI_WAN = "enable_multi_wan"  # New configuration for multi-WAN support
 
 # Service names
 SERVICE_START_SPEED_TEST = "start_speed_test"
@@ -26,6 +27,7 @@ SERVICE_GET_SPEED_TEST_STATUS = "get_speed_test_status"
 DEFAULT_SCHEDULE_INTERVAL = 90  # 90 minutes (conservative to avoid rate limiting)
 DEFAULT_ENABLE_SCHEDULING = True
 DEFAULT_POLLING_INTERVAL = 30  # 30 minutes (auto-calculated when not specified)
+DEFAULT_ENABLE_MULTI_WAN = True  # Enable multi-WAN detection by default
 
 # Rate limiting constants
 MIN_SCHEDULE_INTERVAL = 15  # Minimum 15 minutes between speed tests

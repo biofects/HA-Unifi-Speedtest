@@ -5,7 +5,9 @@
 
 ## 🔍 About
 
-This Home Assistant custom integration provides real-time speed test monitoring for UniFi networks. It supports both traditional UniFi Controller software and UDM Pro/Cloud Key setups, allowing you to track download speed, upload speed, and ping directly within Home Assistant.
+This Home Assistant custom integration provides real-time speed test monitoring for UniFi networks with **enhanced dual WAN support**. It supports all UniFi platforms including UDM Pro, UDM SE, Cloud Key, and traditional UniFi Controller software, allowing you to track download speed, upload speed, and ping directly within Home Assistant.
+
+**🆕 NEW: Multi-WAN Detection** - Automatically detects and creates separate sensors for each WAN interface in dual WAN setups, solving the issue where both WANs showed identical speeds.
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
 [![GitHub Release][releases-shield]][releases]
@@ -29,23 +31,38 @@ If you find this plugin useful, please consider donating. Your support is greatl
 
 ## ✨ Features
 
-- **Dual Controller Support**: Works with both traditional UniFi Controller software and UDM Pro/Cloud Key
-- **Speed Test Monitoring**: Retrieve network speed test results automatically
-- **Real-time Metrics**: Monitor download speeds, upload speeds, and network latency (ping)
-- **Speed Test Initiation**: Start speed tests remotely via Home Assistant (traditional controllers only)
-- **Home Assistant Services**: Integrate with automations and scripts
+- **🌐 Dual WAN Support**: Automatically detects and monitors multiple WAN interfaces separately
+- **🔧 Universal Compatibility**: Works with UDM Pro, UDM SE, UDM Base, Cloud Key Gen2+, and traditional UniFi Controllers
+- **📊 Real-time Metrics**: Monitor download speeds, upload speeds, and network latency (ping) for each WAN
+- **🚀 Speed Test Initiation**: Start speed tests remotely via Home Assistant (traditional controllers)
+- **🏠 Home Assistant Integration**: Full integration with automations, scripts, and dashboards
+- **⚙️ Configurable**: Enable/disable multi-WAN detection, adjust polling intervals, and customize scheduling
 
 ## 🏗 Supported Systems
 
-### ✅ Traditional UniFi Controller Software
-- **Full functionality** including API-initiated speed tests
-- Typically runs on dedicated hardware or Cloud Key Gen1
-- URL format: `https://controller-ip:8443`
+### ✅ UDM Pro / UDM SE
+- **Multi-WAN Support**: ✅ Full dual WAN detection and monitoring
+- **Speed Test Monitoring**: ✅ Automatic retrieval of speed test results
+- **Separate Sensors**: ✅ Individual sensors for each WAN interface
+- **URL Format**: `https://udm-ip` (port 443)
 
-### ✅ UDM Pro/Cloud Key Gen2+
-- **Speed test result monitoring** (reading existing test data)
-- Speed tests must be initiated manually via UniFi Network web interface
-- URL format: `https://udm-ip` (port 443)
+### ✅ UDM Base
+- **Multi-WAN Support**: ❌ Single WAN hardware limitation
+- **Speed Test Monitoring**: ✅ Standard monitoring for single WAN
+- **Backward Compatible**: ✅ Works exactly as before
+- **URL Format**: `https://udm-ip` (port 443)
+
+### ✅ Cloud Key Gen2+ with Multi-WAN Gateway
+- **Multi-WAN Support**: ✅ Depends on gateway model (USG Pro 4, UXG Pro)
+- **Speed Test Monitoring**: ✅ Full functionality
+- **API Support**: ✅ Modern UniFi OS endpoints
+- **URL Format**: `https://cloudkey-ip` (port 443)
+
+### ✅ Traditional UniFi Controller Software
+- **Multi-WAN Support**: ⚠️ Depends on gateway hardware
+- **Speed Test Monitoring**: ✅ Full functionality including API-initiated tests
+- **Legacy Support**: ✅ Enhanced compatibility with older API structures
+- **URL Format**: `https://controller-ip:8443`
 
 ## 🚀 Installation
 
@@ -75,23 +92,56 @@ If you find this plugin useful, please consider donating. Your support is greatl
 3. Search for "HA Unifi Speedtest"
 4. Enter the following details:
    - **URL**: Your UniFi Controller URL
+     - UDM Pro/SE: `https://udm-ip`
+     - Cloud Key Gen2+: `https://cloudkey-ip`
      - Traditional Controller: `https://controller-ip:8443`
-     - UDM Pro: `https://udm-ip`
    - **Username**: UniFi Controller admin username
    - **Password**: UniFi Controller admin password
    - **Controller Type**: Select your controller type
-     - `udm` - for UDM Pro, UDM, Cloud Key Gen2+
+     - `udm` - for UDM Pro, UDM SE, UDM Base, Cloud Key Gen2+
      - `controller` - for traditional UniFi Controller software
    - **Site** (Optional): Site name (default: "default")
    - **SSL Verification** (Optional): Enable/disable SSL certificate verification
+   - **🆕 Enable Multi-WAN Detection**: Toggle multi-WAN sensor creation (default: enabled)
+   - **Enable Automatic Speed Tests**: Schedule regular speed tests
+   - **Speed Test Interval**: How often to run automatic tests (15-1440 minutes)
 
 ## 📡 Sensors
 
+### Single WAN Setup
 The integration creates three sensors for monitoring network performance:
 
-- **UniFi Speed Test Download Speed** (Mbps)
-- **UniFi Speed Test Upload Speed** (Mbps)  
+- **UniFi Speed Test Download Speed** (Mbit/s)
+- **UniFi Speed Test Upload Speed** (Mbit/s)  
 - **UniFi Speed Test Ping** (ms)
+
+### 🆕 Dual WAN Setup
+For multi-WAN configurations, separate sensors are created for each WAN interface:
+
+**WAN 1:**
+- **UniFi Speed Test Download Speed WAN** (Mbit/s)
+- **UniFi Speed Test Upload Speed WAN** (Mbit/s)  
+- **UniFi Speed Test Ping WAN** (ms)
+
+**WAN 2:**
+- **UniFi Speed Test Download Speed WAN2** (Mbit/s)
+- **UniFi Speed Test Upload Speed WAN2** (Mbit/s)  
+- **UniFi Speed Test Ping WAN2** (ms)
+
+### Additional Sensors
+- **UniFi Speed Test Runs**: Track total number of speed tests performed
+- **UniFi API Health**: Monitor integration connection status
+
+### 🏷️ Sensor Attributes
+
+Each multi-WAN sensor includes additional attributes:
+- `interface_name`: Physical interface (e.g., "eth9", "eth10")
+- `wan_networkgroup`: WAN group name (e.g., "WAN", "WAN2")
+- `wan_number`: Sequential WAN number
+- `total_wan_interfaces`: Total detected WAN interfaces
+- `is_primary_wan`: Boolean indicating primary WAN
+- `timestamp`: Last speedtest timestamp
+- `status`: Interface status
 
 ## 🔧 Services
 
@@ -147,17 +197,27 @@ entities:
     name: Ping
 ```
 
-# HA UniFi Speedtest v1.4.0 - Update Notes
+# HA UniFi Speedtest v2.0.1 - Update Notes
 
-## 🆕 What's New in v1.4.0
-### ✅ **Added Poll control**
-Add Poll interval to config
+## 🆕 What's New in v2.0.1
+### ✅ **Multi-WAN Support** (Fixed and Enhanced)
+- **Dual WAN Detection**: Automatically detects and creates separate sensors for each WAN interface
+- **Individual WAN Monitoring**: Each WAN interface gets its own dedicated sensors for download, upload, and ping
+- **Universal Compatibility**: Works with all UniFi controller types (UDM Pro, UDM SE, UDM Base, Cloud Key Gen2+, and traditional software)
+- **Automatic Fallback**: Gracefully falls back to single WAN mode when only one interface is detected
+- **Optional Configuration**: Multi-WAN support can be enabled/disabled during setup
 
-### ✅ **Fixed Compatability issues**
-Fixed compatability issues for UDM and Software based
+### ✅ **Enhanced Controller Compatibility**
+- **UDM Pro/SE Enhanced**: Improved API handling for UniFi OS-based controllers
+- **Traditional Controller Optimized**: Better support for legacy UniFi Controller software
+- **Cloud Key Gen2+ Support**: Full compatibility with Cloud Key Generation 2 Plus controllers
+- **Unified API Interface**: Single codebase handles all controller variations seamlessly
 
-### ✅ **Adusted inital Run Time**
-Inital Run on Software was not correct updated that to prevent 5 min runs
+### ✅ **Previous Updates (v1.4.0)**
+- **Added Poll Control**: Configurable poll interval
+- **Fixed Compatibility Issues**: Resolved UDM and Software-based controller issues
+- **Adjusted Initial Run Time**: Corrected initial run timing for software controllers
+- **Manual Speed Test Button**: Added on-demand speed test capability
 
 ### ✅ **Manual Speed Test Button**
 Add this button to your dashboard for on-demand speed tests:
