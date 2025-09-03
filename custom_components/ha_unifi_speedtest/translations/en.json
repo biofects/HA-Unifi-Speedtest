@@ -1,6 +1,5 @@
 {
     "config": {
-      "title": "UniFi Speed Test",
       "step": {
         "user": {
           "title": "Setup UniFi Speed Test",
