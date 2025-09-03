@@ -5,8 +5,9 @@
   "config_flow": true,
   "dependencies": [],
   "documentation": "https://github.com/biofects/HA-Unifi-Speedtest",
-  "issue_tracker": "https://github.com/biofects/HA-Unifi-Speedtest/issues",
+  "integration_type": "device",
   "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/biofects/HA-Unifi-Speedtest/issues",
   "requirements": ["requests"],
   "version": "2.0.1"
 }
