@@ -38,6 +38,28 @@ If you find this plugin useful, please consider donating. Your support is greatl
 - **🏠 Home Assistant Integration**: Full integration with automations, scripts, and dashboards
 - **⚙️ Configurable**: Enable/disable multi-WAN detection, adjust polling intervals, and customize scheduling
 
+## 📸 Screenshots
+
+### Configuration
+Configure multi-WAN support during setup to enable separate monitoring for each WAN interface:
+
+![Multi-WAN Configuration](images/configwan.png)
+
+### Dual WAN Monitoring in Action
+See how the integration creates separate sensors for each WAN interface, providing individual speed metrics:
+
+#### WAN 1 Sensors
+Monitor your primary WAN connection with dedicated sensors for download, upload, and ping:
+
+![WAN 1 Sensors](images/wan1.png)
+
+#### WAN 2 Sensors  
+Track your secondary WAN connection independently with its own set of performance metrics:
+
+![WAN 2 Sensors](images/wan2.png)
+
+*Notice how each WAN interface gets its own sensors, solving the issue where dual WAN setups previously showed identical speeds for both connections.*
+
 ## 🏗 Supported Systems
 
 ### ✅ UDM Pro / UDM SE
@@ -105,6 +127,8 @@ If you find this plugin useful, please consider donating. Your support is greatl
    - **🆕 Enable Multi-WAN Detection**: Toggle multi-WAN sensor creation (default: enabled)
    - **Enable Automatic Speed Tests**: Schedule regular speed tests
    - **Speed Test Interval**: How often to run automatic tests (15-1440 minutes)
+
+📋 **See the [Screenshots](#-screenshots) section above for visual examples of the configuration process and resulting sensors.**
 
 ## 📡 Sensors
 
