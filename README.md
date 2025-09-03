@@ -10,8 +10,10 @@ This Home Assistant custom integration provides real-time speed test monitoring 
 **🆕 NEW: Multi-WAN Detection** - Automatically detects and creates separate sensors for each WAN interface in dual WAN setups, solving the issue where both WANs showed identical speeds.
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
-[![GitHub Release][releases-shield]][releases]
-![Project Maintenance][maintenance-shield]
+[![GitHub Release](https://img.shields.io/github/v/release/biofects/HA-Unifi-Speedtest?style=flat-square)](https://github.com/biofects/HA-Unifi-Speedtest/releases)
+[![GitHub Last Commit](https://img.shields.io/github/last-commit/biofects/HA-Unifi-Speedtest?style=flat-square)](https://github.com/biofects/HA-Unifi-Speedtest/commits/main)
+[![GitHub Issues](https://img.shields.io/github/issues/biofects/HA-Unifi-Speedtest?style=flat-square)](https://github.com/biofects/HA-Unifi-Speedtest/issues)
+[![License](https://img.shields.io/github/license/biofects/HA-Unifi-Speedtest?style=flat-square)](https://github.com/biofects/HA-Unifi-Speedtest/blob/main/LICENSE)
 
 ---
 ## 💸 Donations Appreciated!
