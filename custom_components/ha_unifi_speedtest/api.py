@@ -690,11 +690,17 @@ class UniFiAPI:
                 _LOGGER.debug(f"Failed to get multi-WAN data from {endpoint}: {e}")
                 continue
         
+        # Determine primary WAN more intelligently
+        primary_wan = self._determine_primary_wan_udm(wan_interfaces) if wan_interfaces else None
+        
+        _LOGGER.info(f"UDM Multi-WAN detection complete: {len(wan_interfaces)} interfaces found, primary: {primary_wan}")
+        _LOGGER.debug(f"WAN interfaces found: {list(wan_interfaces.keys())}")
+        
         # Enhanced result with platform detection
         result = {
             'wan_interfaces': list(wan_interfaces.values()),
             'total_interfaces': len(wan_interfaces),
-            'primary_wan': list(wan_interfaces.keys())[0] if wan_interfaces else None,
+            'primary_wan': primary_wan,
             'multi_wan_enabled': True,
             'platform_type': 'udm',
             'detection_method': 'multi_endpoint_scan'
@@ -782,14 +788,263 @@ class UniFiAPI:
                 _LOGGER.debug(f"Failed to get multi-WAN data from {endpoint}: {e}")
                 continue
         
+        # Determine primary WAN more intelligently  
+        primary_wan = self._determine_primary_wan_controller(wan_interfaces) if wan_interfaces else None
+        
+        _LOGGER.info(f"Controller Multi-WAN detection complete: {len(wan_interfaces)} interfaces found, primary: {primary_wan}")
+        _LOGGER.debug(f"WAN interfaces found: {list(wan_interfaces.keys())}")
+        
         return {
             'wan_interfaces': list(wan_interfaces.values()),
             'total_interfaces': len(wan_interfaces),
-            'primary_wan': list(wan_interfaces.keys())[0] if wan_interfaces else None,
+            'primary_wan': primary_wan,
             'multi_wan_enabled': True,
             'platform_type': 'controller',
             'detection_method': 'legacy_endpoint_scan'
         }
+
+    def _determine_primary_wan_udm(self, wan_interfaces):
+        """Determine primary WAN interface for UDM controllers using routing and configuration data."""
+        if not wan_interfaces:
+            return None
+            
+        _LOGGER.debug("Attempting to determine primary WAN for UDM platform")
+        
+        # Try to get routing information and network configuration
+        routing_info = self._get_udm_routing_info()
+        network_config = self._get_udm_network_config()
+        
+        # Method 1: Check routing table for default route
+        if routing_info:
+            primary_from_routing = self._find_primary_from_routing(routing_info, wan_interfaces)
+            if primary_from_routing:
+                _LOGGER.info(f"Primary WAN determined from routing table: {primary_from_routing}")
+                return primary_from_routing
+        
+        # Method 2: Check network configuration priorities  
+        if network_config:
+            primary_from_config = self._find_primary_from_network_config(network_config, wan_interfaces)
+            if primary_from_config:
+                _LOGGER.info(f"Primary WAN determined from network config: {primary_from_config}")
+                return primary_from_config
+        
+        # Method 3: Look for active connections with actual speed test data
+        primary_from_data = self._find_primary_from_speedtest_data(wan_interfaces)
+        if primary_from_data:
+            _LOGGER.info(f"Primary WAN determined from speedtest data: {primary_from_data}")
+            return primary_from_data
+            
+        # Fallback: Use first interface (existing logic)
+        fallback = list(wan_interfaces.keys())[0]
+        _LOGGER.warning(f"Could not determine primary WAN intelligently, falling back to first interface: {fallback}")
+        return fallback
+    
+    def _determine_primary_wan_controller(self, wan_interfaces):
+        """Determine primary WAN interface for traditional controllers."""
+        if not wan_interfaces:
+            return None
+            
+        _LOGGER.debug("Attempting to determine primary WAN for traditional controller")
+        
+        # Try to get routing and configuration information
+        routing_info = self._get_controller_routing_info()
+        
+        # Method 1: Check routing information
+        if routing_info:
+            primary_from_routing = self._find_primary_from_routing(routing_info, wan_interfaces)
+            if primary_from_routing:
+                _LOGGER.info(f"Primary WAN determined from routing: {primary_from_routing}")
+                return primary_from_routing
+        
+        # Method 2: Look for active connections with speed test data
+        primary_from_data = self._find_primary_from_speedtest_data(wan_interfaces)
+        if primary_from_data:
+            _LOGGER.info(f"Primary WAN determined from speedtest data: {primary_from_data}")
+            return primary_from_data
+        
+        # Fallback: Use first interface (existing logic)
+        fallback = list(wan_interfaces.keys())[0]
+        _LOGGER.warning(f"Could not determine primary WAN intelligently, falling back to first interface: {fallback}")
+        return fallback
+
+    def _get_udm_routing_info(self):
+        """Get routing information from UDM platform."""
+        endpoints_to_try = [
+            f"{self.url}/proxy/network/api/s/{self.site}/stat/routes",
+            f"{self.url}/proxy/network/api/s/{self.site}/stat/routing",
+            f"{self.url}/proxy/network/api/s/{self.site}/rest/routing/table"
+        ]
+        
+        for endpoint in endpoints_to_try:
+            try:
+                _LOGGER.debug(f"Requesting UDM routing info from: {endpoint}")
+                response = self._make_request(self.session.get, endpoint, max_retries=1)
+                data = response.json()
+                if 'data' in data and data['data']:
+                    _LOGGER.debug(f"Successfully retrieved routing info from {endpoint}")
+                    return data['data']
+            except Exception as e:
+                _LOGGER.debug(f"Failed to get routing info from {endpoint}: {e}")
+                continue
+        
+        return None
+    
+    def _get_udm_network_config(self):
+        """Get network configuration from UDM platform."""
+        endpoints_to_try = [
+            f"{self.url}/proxy/network/api/s/{self.site}/rest/networkconf",
+            f"{self.url}/proxy/network/api/s/{self.site}/rest/wanconf"
+        ]
+        
+        for endpoint in endpoints_to_try:
+            try:
+                _LOGGER.debug(f"Requesting UDM network config from: {endpoint}")
+                response = self._make_request(self.session.get, endpoint, max_retries=1)
+                data = response.json()
+                if 'data' in data and data['data']:
+                    _LOGGER.debug(f"Successfully retrieved network config from {endpoint}")
+                    return data['data']
+            except Exception as e:
+                _LOGGER.debug(f"Failed to get network config from {endpoint}: {e}")
+                continue
+        
+        return None
+    
+    def _get_controller_routing_info(self):
+        """Get routing information from traditional controller."""
+        endpoints_to_try = [
+            f"{self.url}/api/s/{self.site}/stat/routes", 
+            f"{self.url}/api/s/{self.site}/stat/routing"
+        ]
+        
+        for endpoint in endpoints_to_try:
+            try:
+                _LOGGER.debug(f"Requesting controller routing info from: {endpoint}")
+                response = self._make_request(self.session.get, endpoint, max_retries=1)
+                data = response.json()
+                if 'data' in data and data['data']:
+                    _LOGGER.debug(f"Successfully retrieved routing info from {endpoint}")
+                    return data['data']
+            except Exception as e:
+                _LOGGER.debug(f"Failed to get routing info from {endpoint}: {e}")
+                continue
+        
+        return None
+    
+    def _find_primary_from_routing(self, routing_info, wan_interfaces):
+        """Find primary WAN from routing table data."""
+        try:
+            # Look for default route (0.0.0.0/0)
+            for route in routing_info:
+                network = route.get('network', route.get('destination', ''))
+                netmask = route.get('netmask', route.get('mask', ''))
+                interface = route.get('interface', route.get('dev', ''))
+                
+                # Check if this is a default route
+                if (network in ['0.0.0.0', 'default'] and netmask in ['0.0.0.0', '0']):
+                    # Find matching WAN interface
+                    for wan_key, wan_data in wan_interfaces.items():
+                        wan_interface = wan_data.get('interface_name', '')
+                        if wan_interface and interface and (
+                            interface == wan_interface or 
+                            interface.startswith(wan_interface) or
+                            wan_interface.startswith(interface)
+                        ):
+                            _LOGGER.debug(f"Found default route via interface {interface} matching WAN {wan_interface}")
+                            return wan_key
+                            
+            # Look for routes with highest priority or lowest metric
+            default_routes = []
+            for route in routing_info:
+                network = route.get('network', route.get('destination', ''))
+                if network in ['0.0.0.0', 'default']:
+                    default_routes.append(route)
+            
+            if default_routes:
+                # Sort by metric (lower is better) or priority
+                default_routes.sort(key=lambda r: r.get('metric', r.get('priority', 9999)))
+                best_route = default_routes[0]
+                interface = best_route.get('interface', best_route.get('dev', ''))
+                
+                for wan_key, wan_data in wan_interfaces.items():
+                    wan_interface = wan_data.get('interface_name', '')
+                    if wan_interface and interface and interface.startswith(wan_interface):
+                        _LOGGER.debug(f"Found best metric default route via {interface}")
+                        return wan_key
+                        
+        except Exception as e:
+            _LOGGER.debug(f"Error parsing routing info: {e}")
+            
+        return None
+    
+    def _find_primary_from_network_config(self, network_config, wan_interfaces):
+        """Find primary WAN from network configuration."""
+        try:
+            # Look for WAN configuration with primary designation
+            for config in network_config:
+                purpose = config.get('purpose', '').lower()
+                if 'wan' in purpose:
+                    interface = config.get('interface', config.get('name', ''))
+                    is_primary = config.get('is_primary', config.get('primary', False))
+                    wan_type = config.get('wan_type', config.get('type', ''))
+                    
+                    # Check if explicitly marked as primary
+                    if is_primary:
+                        for wan_key, wan_data in wan_interfaces.items():
+                            wan_interface = wan_data.get('interface_name', '')
+                            if wan_interface and interface and (
+                                interface == wan_interface or 
+                                interface.startswith(wan_interface)
+                            ):
+                                _LOGGER.debug(f"Found primary WAN from config: {interface}")
+                                return wan_key
+                    
+                    # Check for WAN type priorities (dhcp vs pppoe vs static)
+                    if wan_type == 'dhcp' and interface:
+                        for wan_key, wan_data in wan_interfaces.items():
+                            wan_interface = wan_data.get('interface_name', '')
+                            if wan_interface and interface.startswith(wan_interface):
+                                _LOGGER.debug(f"Found DHCP WAN interface: {interface}")
+                                return wan_key
+                                
+        except Exception as e:
+            _LOGGER.debug(f"Error parsing network config: {e}")
+            
+        return None
+    
+    def _find_primary_from_speedtest_data(self, wan_interfaces):
+        """Find primary WAN based on which interface has the most recent speed test data."""
+        try:
+            wan_with_data = []
+            
+            for wan_key, wan_data in wan_interfaces.items():
+                download = wan_data.get('download')
+                upload = wan_data.get('upload')
+                timestamp = wan_data.get('timestamp')
+                
+                # Score based on having data and recency
+                score = 0
+                if download is not None and download > 0:
+                    score += 10
+                if upload is not None and upload > 0:
+                    score += 10
+                if timestamp:
+                    score += 5
+                
+                if score > 0:
+                    wan_with_data.append((wan_key, score, timestamp))
+            
+            if wan_with_data:
+                # Sort by score (descending) then by timestamp (most recent first)
+                wan_with_data.sort(key=lambda x: (x[1], x[2] or 0), reverse=True)
+                primary_wan = wan_with_data[0][0]
+                _LOGGER.debug(f"Found primary WAN from speed test data: {primary_wan}")
+                return primary_wan
+                
+        except Exception as e:
+            _LOGGER.debug(f"Error finding primary from speedtest data: {e}")
+            
+        return None
 
     def _safe_float(self, value):
         """Safely convert value to float"""

@@ -537,12 +537,43 @@ class UniFiSpeedTestSensorMultiWAN(CoordinatorEntity, SensorEntity):
             
             attributes.update({
                 "total_wan_interfaces": self.coordinator.data.get('total_interfaces', 1),
-                "is_primary_wan": wan_data.get('interface_name') == self.coordinator.data.get('primary_wan', '').split('_')[0],
+                "is_primary_wan": self._determine_is_primary_wan(wan_data),
                 "timestamp": wan_data.get('timestamp'),
                 "status": wan_data.get('status', 'unknown')
             })
         
         return attributes
+
+    def _determine_is_primary_wan(self, wan_data):
+        """Determine if this WAN interface is the primary one using improved logic."""
+        if not self.coordinator.data:
+            return False
+            
+        # Get the primary WAN identifier from coordinator data
+        primary_wan = self.coordinator.data.get('primary_wan')
+        if not primary_wan:
+            return False
+        
+        # Method 1: Direct key match
+        current_wan_key = f"{self._interface_name}_{self._wan_group}"
+        if current_wan_key == primary_wan:
+            return True
+            
+        # Method 2: Interface name match (backward compatibility)
+        interface_name = wan_data.get('interface_name', self._interface_name)
+        primary_interface = primary_wan.split('_')[0] if '_' in primary_wan else primary_wan
+        
+        if interface_name == primary_interface:
+            return True
+            
+        # Method 3: Check if this is the first WAN and no clear primary was determined
+        wan_interfaces = self.coordinator.data.get('wan_interfaces', [])
+        if (len(wan_interfaces) > 0 and 
+            self._wan_index == 0 and 
+            primary_wan == list(self.coordinator.data.get('wan_interfaces', [{}]))[0].get('interface_name')):
+            return True
+            
+        return False
 
     @property
     def device_info(self):
