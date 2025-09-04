@@ -463,6 +463,17 @@ class UniFiSpeedTestSensorMultiWAN(CoordinatorEntity, SensorEntity):
 
     @property
     def name(self) -> str:
+        # Determine if this is primary WAN for better naming
+        if (self.coordinator.data and 
+            'wan_interfaces' in self.coordinator.data and 
+            self._wan_index < len(self.coordinator.data['wan_interfaces'])):
+            wan_data = self.coordinator.data['wan_interfaces'][self._wan_index]
+            is_primary = self._determine_is_primary_wan(wan_data)
+            
+            # Use Primary/Secondary naming for better UX
+            wan_type = "Primary WAN" if is_primary else "Secondary WAN"
+            return f"UniFi Speed Test {self._name.replace(self._wan_group, wan_type)}"
+        
         return f"UniFi Speed Test {self._name}"
 
     @property
@@ -578,9 +589,21 @@ class UniFiSpeedTestSensorMultiWAN(CoordinatorEntity, SensorEntity):
     @property
     def device_info(self):
         """Return device information about this entity."""
+        # Determine if this is primary WAN for better device naming
+        if (self.coordinator.data and 
+            'wan_interfaces' in self.coordinator.data and 
+            self._wan_index < len(self.coordinator.data['wan_interfaces'])):
+            wan_data = self.coordinator.data['wan_interfaces'][self._wan_index]
+            is_primary = self._determine_is_primary_wan(wan_data)
+            
+            # Use Primary/Secondary device naming
+            device_name = f"{INTEGRATION_NAME} {'Primary WAN' if is_primary else 'Secondary WAN'}"
+        else:
+            device_name = f"{INTEGRATION_NAME} {self._wan_group}"
+            
         return {
             "identifiers": {(DOMAIN, f"unifi_speedtest_{self._wan_group}")},
-            "name": f"{INTEGRATION_NAME} {self._wan_group}",
+            "name": device_name,
             "manufacturer": "UniFi",
             "model": f"WAN Interface {self._interface_name}",
             "via_device": (DOMAIN, "unifi_speedtest")

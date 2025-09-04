@@ -40,7 +40,7 @@ If you find this plugin useful, please consider donating. Your support is greatl
 - **🚀 Speed Test Initiation**: Start speed tests remotely via Home Assistant (traditional controllers)
 - **🏠 Home Assistant Integration**: Full integration with automations, scripts, and dashboards
 - **⚙️ Configurable**: Enable/disable multi-WAN detection, adjust polling intervals, and customize scheduling
-- **🔍 Debug Tools**: Includes diagnostic scripts to troubleshoot WAN detection issues
+- **🏷️ Smart Naming**: Automatically labels devices and sensors as "Primary WAN" and "Secondary WAN"
 
 ## 📸 Screenshots
 
@@ -234,13 +234,13 @@ entities:
 - **Smart Primary WAN Detection**: Now properly identifies the primary WAN interface based on routing tables and network configuration
 - **Resolves Dual WAN Issues**: Fixes issues where secondary physical ports configured as primary WAN showed incorrect "is_primary_wan" status  
 - **Multiple Detection Methods**: Uses routing table analysis, network configuration, and speed test data to determine the true primary WAN
-- **Diagnostic Tools**: Includes debug script to troubleshoot primary WAN detection issues
+- **Smart Device Naming**: Automatically names devices and sensors as "Primary WAN" and "Secondary WAN" for clarity
 - **Backward Compatible**: Falls back to previous behavior if advanced detection fails
 
-### ✅ **Enhanced Logging and Debugging**
-- **Detailed WAN Detection Logs**: Shows which method was used to determine primary WAN
-- **Debug Script**: New `debug_primary_wan.py` script to troubleshoot detection issues
-- **Improved Error Messages**: Better error reporting for WAN detection problems
+### ✅ **Enhanced User Experience**
+- **Clear Device Names**: Devices now show as "Primary WAN" and "Secondary WAN" instead of "WAN" and "WAN2"
+- **Improved Sensor Names**: Sensors clearly indicate which is primary vs secondary
+- **Better Attributes**: Enhanced sensor attributes show primary WAN status and interface details
 
 ## 🆕 Previous Updates (v2.0.1)
 ### ✅ **Multi-WAN Support** (Fixed and Enhanced)
@@ -334,26 +334,21 @@ The integration now uses **intelligent primary WAN detection** to properly ident
    - Verify that your desired primary WAN is correctly configured in the UniFi Network application
    - Ensure the routing table reflects your intended primary WAN
 
-2. **Run Diagnostic Script**:
-   ```bash
-   cd /path/to/ha_unifi_speedtest
-   python3 debug_primary_wan.py https://your-udm-ip username password
-   ```
-   This will show detailed information about WAN detection and routing.
-
-3. **Check Integration Logs**:
+2. **Check Integration Logs**:
    - Enable debug logging (see below)
    - Look for messages like: "Primary WAN determined from routing table: eth9_WAN"
    - The logs will show which detection method was used
 
-4. **Verify Interface Names**:
-   - The integration shows the actual interface names (e.g., "eth9", "eth10")
-   - Cross-reference these with your UniFi controller's interface assignments
+3. **Check Sensor Attributes**:
+   - Go to Developer Tools > States
+   - Find your UniFi speed test sensors
+   - Check if `is_primary_wan` is correct on your configured primary WAN
 
 **Expected Behavior**:
 - The WAN interface you've configured as primary in UniFi should show `is_primary_wan: true`
 - That interface should have the speed test results
 - Other WAN interfaces should show `is_primary_wan: false`
+- Devices and sensors will be named "Primary WAN" and "Secondary WAN"
 
 ### Debug Logging
 
