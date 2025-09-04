@@ -34,11 +34,13 @@ If you find this plugin useful, please consider donating. Your support is greatl
 ## ✨ Features
 
 - **🌐 Dual WAN Support**: Automatically detects and monitors multiple WAN interfaces separately
+- **🎯 Intelligent Primary WAN Detection**: Properly identifies primary WAN based on routing configuration, not just physical port order
 - **🔧 Universal Compatibility**: Works with UDM Pro, UDM SE, UDM Base, Cloud Key Gen2+, and traditional UniFi Controllers
 - **📊 Real-time Metrics**: Monitor download speeds, upload speeds, and network latency (ping) for each WAN
 - **🚀 Speed Test Initiation**: Start speed tests remotely via Home Assistant (traditional controllers)
 - **🏠 Home Assistant Integration**: Full integration with automations, scripts, and dashboards
 - **⚙️ Configurable**: Enable/disable multi-WAN detection, adjust polling intervals, and customize scheduling
+- **🏷️ Smart Naming**: Automatically labels devices and sensors as "Primary WAN" and "Secondary WAN"
 
 ## 📸 Screenshots
 
@@ -165,9 +167,11 @@ Each multi-WAN sensor includes additional attributes:
 - `wan_networkgroup`: WAN group name (e.g., "WAN", "WAN2")
 - `wan_number`: Sequential WAN number
 - `total_wan_interfaces`: Total detected WAN interfaces
-- `is_primary_wan`: Boolean indicating primary WAN
+- `is_primary_wan`: Boolean indicating primary WAN (intelligently determined from routing/config)
 - `timestamp`: Last speedtest timestamp
 - `status`: Interface status
+
+**Note on `is_primary_wan`**: This attribute now reflects the **actual** primary WAN as configured in your UniFi controller, not just the first physical port detected. If you've configured a secondary port (like SFP+ port 2) as your primary WAN, that interface will correctly show `is_primary_wan: true`.
 
 ## 🔧 Services
 
@@ -225,7 +229,20 @@ entities:
 
 # HA UniFi Speedtest v2.0.1 - Update Notes
 
-## 🆕 What's New in v2.0.1
+## 🆕 What's New in v2.1.0 (Latest)
+### ✅ **Intelligent Primary WAN Detection** 
+- **Smart Primary WAN Detection**: Now properly identifies the primary WAN interface based on routing tables and network configuration
+- **Resolves Dual WAN Issues**: Fixes issues where secondary physical ports configured as primary WAN showed incorrect "is_primary_wan" status  
+- **Multiple Detection Methods**: Uses routing table analysis, network configuration, and speed test data to determine the true primary WAN
+- **Smart Device Naming**: Automatically names devices and sensors as "Primary WAN" and "Secondary WAN" for clarity
+- **Backward Compatible**: Falls back to previous behavior if advanced detection fails
+
+### ✅ **Enhanced User Experience**
+- **Clear Device Names**: Devices now show as "Primary WAN" and "Secondary WAN" instead of "WAN" and "WAN2"
+- **Improved Sensor Names**: Sensors clearly indicate which is primary vs secondary
+- **Better Attributes**: Enhanced sensor attributes show primary WAN status and interface details
+
+## 🆕 Previous Updates (v2.0.1)
 ### ✅ **Multi-WAN Support** (Fixed and Enhanced)
 - **Dual WAN Detection**: Automatically detects and creates separate sensors for each WAN interface
 - **Individual WAN Monitoring**: Each WAN interface gets its own dedicated sensors for download, upload, and ping
@@ -300,6 +317,38 @@ tap_action:
 - Ensure at least one speed test has been run on your controller
 - Traditional controllers: Use the `start_speed_test` service
 - UDM Pro: Run a speed test via the web interface first
+
+### Primary WAN Detection Issues
+
+The integration now uses **intelligent primary WAN detection** to properly identify which WAN interface is actually your primary connection, even if you've configured a secondary port (like SFP+ port 2) as your primary WAN.
+
+**Primary WAN Detection Methods** (in order of priority):
+1. **Routing Table Analysis**: Checks the default route (0.0.0.0/0) to identify which interface handles the primary traffic
+2. **Network Configuration**: Looks for explicitly configured primary WAN settings in the UniFi controller
+3. **Speed Test Data**: Uses the WAN interface with the most recent and complete speed test data
+4. **Fallback**: Uses the first detected interface (legacy behavior)
+
+**If Primary WAN Detection is Incorrect**:
+
+1. **Check UniFi Network Settings**: 
+   - Verify that your desired primary WAN is correctly configured in the UniFi Network application
+   - Ensure the routing table reflects your intended primary WAN
+
+2. **Check Integration Logs**:
+   - Enable debug logging (see below)
+   - Look for messages like: "Primary WAN determined from routing table: eth9_WAN"
+   - The logs will show which detection method was used
+
+3. **Check Sensor Attributes**:
+   - Go to Developer Tools > States
+   - Find your UniFi speed test sensors
+   - Check if `is_primary_wan` is correct on your configured primary WAN
+
+**Expected Behavior**:
+- The WAN interface you've configured as primary in UniFi should show `is_primary_wan: true`
+- That interface should have the speed test results
+- Other WAN interfaces should show `is_primary_wan: false`
+- Devices and sensors will be named "Primary WAN" and "Secondary WAN"
 
 ### Debug Logging
 

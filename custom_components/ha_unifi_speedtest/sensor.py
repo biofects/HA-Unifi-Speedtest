@@ -463,6 +463,17 @@ class UniFiSpeedTestSensorMultiWAN(CoordinatorEntity, SensorEntity):
 
     @property
     def name(self) -> str:
+        # Determine if this is primary WAN for better naming
+        if (self.coordinator.data and 
+            'wan_interfaces' in self.coordinator.data and 
+            self._wan_index < len(self.coordinator.data['wan_interfaces'])):
+            wan_data = self.coordinator.data['wan_interfaces'][self._wan_index]
+            is_primary = self._determine_is_primary_wan(wan_data)
+            
+            # Use Primary/Secondary naming for better UX
+            wan_type = "Primary WAN" if is_primary else "Secondary WAN"
+            return f"UniFi Speed Test {self._name.replace(self._wan_group, wan_type)}"
+        
         return f"UniFi Speed Test {self._name}"
 
     @property
@@ -537,19 +548,62 @@ class UniFiSpeedTestSensorMultiWAN(CoordinatorEntity, SensorEntity):
             
             attributes.update({
                 "total_wan_interfaces": self.coordinator.data.get('total_interfaces', 1),
-                "is_primary_wan": wan_data.get('interface_name') == self.coordinator.data.get('primary_wan', '').split('_')[0],
+                "is_primary_wan": self._determine_is_primary_wan(wan_data),
                 "timestamp": wan_data.get('timestamp'),
                 "status": wan_data.get('status', 'unknown')
             })
         
         return attributes
 
+    def _determine_is_primary_wan(self, wan_data):
+        """Determine if this WAN interface is the primary one using improved logic."""
+        if not self.coordinator.data:
+            return False
+            
+        # Get the primary WAN identifier from coordinator data
+        primary_wan = self.coordinator.data.get('primary_wan')
+        if not primary_wan:
+            return False
+        
+        # Method 1: Direct key match
+        current_wan_key = f"{self._interface_name}_{self._wan_group}"
+        if current_wan_key == primary_wan:
+            return True
+            
+        # Method 2: Interface name match (backward compatibility)
+        interface_name = wan_data.get('interface_name', self._interface_name)
+        primary_interface = primary_wan.split('_')[0] if '_' in primary_wan else primary_wan
+        
+        if interface_name == primary_interface:
+            return True
+            
+        # Method 3: Check if this is the first WAN and no clear primary was determined
+        wan_interfaces = self.coordinator.data.get('wan_interfaces', [])
+        if (len(wan_interfaces) > 0 and 
+            self._wan_index == 0 and 
+            primary_wan == list(self.coordinator.data.get('wan_interfaces', [{}]))[0].get('interface_name')):
+            return True
+            
+        return False
+
     @property
     def device_info(self):
         """Return device information about this entity."""
+        # Determine if this is primary WAN for better device naming
+        if (self.coordinator.data and 
+            'wan_interfaces' in self.coordinator.data and 
+            self._wan_index < len(self.coordinator.data['wan_interfaces'])):
+            wan_data = self.coordinator.data['wan_interfaces'][self._wan_index]
+            is_primary = self._determine_is_primary_wan(wan_data)
+            
+            # Use Primary/Secondary device naming
+            device_name = f"{INTEGRATION_NAME} {'Primary WAN' if is_primary else 'Secondary WAN'}"
+        else:
+            device_name = f"{INTEGRATION_NAME} {self._wan_group}"
+            
         return {
             "identifiers": {(DOMAIN, f"unifi_speedtest_{self._wan_group}")},
-            "name": f"{INTEGRATION_NAME} {self._wan_group}",
+            "name": device_name,
             "manufacturer": "UniFi",
             "model": f"WAN Interface {self._interface_name}",
             "via_device": (DOMAIN, "unifi_speedtest")
