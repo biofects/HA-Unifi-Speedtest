@@ -878,7 +878,11 @@ class UniFiAPI:
             # Test the primary UDM routing endpoint
             endpoint = f"{self.url}/proxy/network/api/s/{self.site}/stat/routes"
             _LOGGER.debug(f"Testing UDM routing endpoint: {endpoint}")
-            response = self._make_request(self.session.get, endpoint, max_retries=1)
+            
+            # Make the request directly instead of using _make_request to handle 404 ourselves
+            response = self.session.get(endpoint, verify=self.verify_ssl, timeout=(10, 20))
+            response.raise_for_status()  # This will raise HTTPError for 4xx/5xx
+            
             data = response.json()
             if 'data' in data and data['data']:
                 _LOGGER.debug(f"Successfully retrieved routing info from UDM endpoint")
