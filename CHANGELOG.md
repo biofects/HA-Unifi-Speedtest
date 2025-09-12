@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.1] - 2025-09-12
+
+### Fixed
+- **UDM Pro 404 Errors**: Fixed HTTPError 404 issues on UDM Pro devices that don't support advanced routing endpoints
+- **Graceful Endpoint Fallback**: Integration now automatically detects when UDM routing endpoints are unsupported and switches to controller mode
+- **Reduced Error Logging**: Eliminated repetitive 404 error messages during integration setup
+- **Exception Handling**: Improved error handling in routing endpoint detection to prevent setup failures
+
+### Changed
+- **Cleaner Setup Process**: UDM routing endpoint testing now handles 404 responses gracefully without logging errors
+- **Better Compatibility**: Enhanced support for UDM Pro devices with different firmware versions that may not support all endpoints
+
 ## [2.1.0] - 2025-09-04
 
 ### Added

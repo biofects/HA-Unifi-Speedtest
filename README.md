@@ -229,7 +229,14 @@ entities:
 
 # HA UniFi Speedtest v2.0.1 - Update Notes
 
-## 🆕 What's New in v2.1.0 (Latest)
+## 🆕 What's New in v2.1.1 (Latest)
+### 🐛 **Bug Fixes**
+- **UDM Pro Compatibility**: Fixed 404 errors on UDM Pro devices that don't support advanced routing endpoints
+- **Graceful Fallback**: Integration now automatically detects unsupported UDM routing endpoints and switches to controller mode
+- **Cleaner Logs**: Eliminated repetitive 404 error messages during setup
+- **Improved Stability**: Better error handling prevents integration setup failures
+
+## 🆕 What's New in v2.1.0
 ### ✅ **Intelligent Primary WAN Detection** 
 - **Smart Primary WAN Detection**: Now properly identifies the primary WAN interface based on routing tables and network configuration
 - **Resolves Dual WAN Issues**: Fixes issues where secondary physical ports configured as primary WAN showed incorrect "is_primary_wan" status  
