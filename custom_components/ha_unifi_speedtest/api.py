@@ -869,23 +869,35 @@ class UniFiAPI:
 
     def _get_udm_routing_info(self):
         """Get routing information from UDM platform."""
-        endpoints_to_try = [
-            f"{self.url}/proxy/network/api/s/{self.site}/stat/routes",
-            f"{self.url}/proxy/network/api/s/{self.site}/stat/routing",
-            f"{self.url}/proxy/network/api/s/{self.site}/rest/routing/table"
-        ]
-        
-        for endpoint in endpoints_to_try:
-            try:
-                _LOGGER.debug(f"Requesting UDM routing info from: {endpoint}")
-                response = self._make_request(self.session.get, endpoint, max_retries=1)
-                data = response.json()
-                if 'data' in data and data['data']:
-                    _LOGGER.debug(f"Successfully retrieved routing info from {endpoint}")
-                    return data['data']
-            except Exception as e:
-                _LOGGER.debug(f"Failed to get routing info from {endpoint}: {e}")
-                continue
+        # Skip UDM routing if we know it's not supported on this device
+        if hasattr(self, '_udm_routing_unsupported') and self._udm_routing_unsupported:
+            _LOGGER.debug("UDM routing known to be unsupported on this device, skipping")
+            return None
+            
+        try:
+            # Test the primary UDM routing endpoint
+            endpoint = f"{self.url}/proxy/network/api/s/{self.site}/stat/routes"
+            _LOGGER.debug(f"Testing UDM routing endpoint: {endpoint}")
+            
+            # Make the request directly instead of using _make_request to handle 404 ourselves
+            response = self.session.get(endpoint, verify=self.verify_ssl, timeout=(10, 20))
+            response.raise_for_status()  # This will raise HTTPError for 4xx/5xx
+            
+            data = response.json()
+            if 'data' in data and data['data']:
+                _LOGGER.debug(f"Successfully retrieved routing info from UDM endpoint")
+                return data['data']
+        except HTTPError as e:
+            if e.response and e.response.status_code == 404:
+                # This UDM/UDM Pro doesn't support routing endpoints - remember this
+                _LOGGER.info("UDM routing endpoints not supported on this device - switching to controller mode")
+                self._udm_routing_unsupported = True
+                self.controller_type = 'controller'  # Switch to controller mode for future calls
+                return None
+            else:
+                _LOGGER.debug(f"UDM routing endpoint error (non-404): {e}")
+        except Exception as e:
+            _LOGGER.debug(f"UDM routing endpoint error: {e}")
         
         return None
     
