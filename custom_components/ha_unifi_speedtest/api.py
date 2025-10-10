@@ -83,6 +83,9 @@ class UniFiAPI:
                 # Clear any existing session cookies to start fresh
                 self.session.cookies.clear()
                 
+                # Use the user-configured controller type
+                _LOGGER.info(f"Using user-configured controller type: {self.controller_type}")
+                
                 if self.controller_type == 'udm':
                     self._login_udm()
                 else:
@@ -342,6 +345,8 @@ class UniFiAPI:
 
     def _start_speed_test_udm(self):
         """Start speed test on UDM Pro with enhanced error handling"""
+        # Use UDM speedtest method as configured
+        
         endpoint = f"{self.url}/proxy/network/api/s/{self.site}/cmd/devmgr/speedtest"
         _LOGGER.info(f"Starting UDM Pro speed test at endpoint: {endpoint}")
         
@@ -441,26 +446,30 @@ class UniFiAPI:
         raise last_exception
 
     def get_speed_test_status(self):
-        """Get speed test status from the appropriate controller type"""
+        """Get speed test status based on controller type"""
         _LOGGER.debug(f"Getting speed test status from {self.controller_type} controller")
         
         # Check if we should skip this request due to rate limiting
         if self._consecutive_403s > self._max_consecutive_403s:
             _LOGGER.warning("Skipping status request due to too many 403 errors")
-            if self.enable_multi_wan:
+            if self.controller_type == 'udm':
                 return {'wan_interfaces': [], 'total_interfaces': 0, 'primary_wan': None, 'multi_wan_enabled': True}
             else:
                 return {'download': None, 'upload': None, 'ping': None}
         
         try:
-            if self.enable_multi_wan:
-                return self.get_speed_test_status_multi_wan()
+            if self.controller_type == 'udm':
+                # UDM controllers - always check for multiple WAN interfaces
+                _LOGGER.debug("UDM controller - checking for multiple WAN interfaces")
+                return self._get_speed_test_status_udm_multi_wan()
             else:
-                return self.get_speed_test_status_legacy()
+                # Traditional controller - single WAN only
+                _LOGGER.debug("Traditional controller - single WAN mode")
+                return self._get_speed_test_status_controller()
         except Exception as e:
             _LOGGER.error(f"Failed to get speed test status: {e}")
             # Return empty result instead of crashing
-            if self.enable_multi_wan:
+            if self.controller_type == 'udm':
                 return {'wan_interfaces': [], 'total_interfaces': 0, 'primary_wan': None, 'multi_wan_enabled': True}
             else:
                 return {'download': None, 'upload': None, 'ping': None}
@@ -483,6 +492,9 @@ class UniFiAPI:
 
     def _get_speed_test_status_udm(self):
         """Get speed test status from UDM Pro with enhanced error handling"""
+        # Use configured controller type unless we have strong evidence to override
+        # Don't auto-redirect UDM to controller endpoints - this was causing issues
+        
         # Try multiple endpoints for UDM data
         endpoints_to_try = [
             f"{self.url}/proxy/network/api/s/{self.site}/stat/health",
@@ -602,6 +614,8 @@ class UniFiAPI:
 
     def _get_speed_test_status_udm_multi_wan(self):
         """Get speed test status from UDM Pro/SE/Base with multi-WAN support"""
+        # Use UDM endpoints as configured - don't auto-redirect to controller endpoints
+        
         # Try multiple endpoints with platform-specific optimizations
         endpoints_to_try = [
             f"{self.url}/proxy/network/v2/api/site/{self.site}/speedtest",
@@ -747,25 +761,54 @@ class UniFiAPI:
                                 }
                     else:
                         # Health endpoint - enhanced for software controller compatibility
+                        _LOGGER.debug(f"Processing {len(data['data'])} subsystems from health endpoint")
+                        
                         for subsystem in data['data']:
                             subsystem_name = subsystem.get('subsystem', '')
+                            _LOGGER.debug(f"Checking subsystem: {subsystem_name} - {subsystem}")
                             
-                            # Enhanced WAN detection for software controller
+                            # Enhanced WAN detection for software controller with broader patterns
                             is_wan_subsystem = (
                                 'wan' in subsystem_name.lower() or 
                                 subsystem_name == 'www' or
                                 'internet' in subsystem_name.lower() or
                                 'gateway' in subsystem_name.lower() or
-                                subsystem_name.startswith('WAN')
+                                subsystem_name.startswith('WAN') or
+                                'eth' in subsystem_name.lower() or  # Ethernet interfaces
+                                'ppp' in subsystem_name.lower() or  # PPP interfaces
+                                subsystem.get('tx_bytes') is not None or  # Has network traffic data
+                                subsystem.get('rx_bytes') is not None    # Has network traffic data
                             )
                             
-                            if is_wan_subsystem:
+                            # Also check if this subsystem has speedtest data regardless of name
+                            has_speedtest_data = any([
+                                subsystem.get('xput_down'),
+                                subsystem.get('xput_up'),
+                                subsystem.get('speedtest_ping')
+                            ])
+                            
+                            if is_wan_subsystem or has_speedtest_data:
+                                _LOGGER.info(f"Found potential WAN interface: {subsystem_name}")
+                                
                                 interface_name = (
                                     subsystem.get('interface') or 
                                     subsystem.get('wan_interface') or
+                                    subsystem.get('name') or
                                     subsystem_name
                                 )
-                                wan_group = subsystem_name.upper() if subsystem_name != 'www' else 'WAN'
+                                
+                                # Better WAN naming for dual-WAN setups
+                                if subsystem_name == 'www':
+                                    wan_group = 'WAN1'  # Primary WAN
+                                elif 'wan2' in subsystem_name.lower() or 'secondary' in subsystem_name.lower():
+                                    wan_group = 'WAN2'  # Secondary WAN
+                                elif subsystem_name.startswith('WAN'):
+                                    wan_group = subsystem_name.upper()
+                                else:
+                                    # Auto-assign WAN numbers based on order
+                                    wan_number = len([k for k in wan_interfaces.keys() if 'WAN' in k]) + 1
+                                    wan_group = f'WAN{wan_number}'
+                                
                                 wan_key = f"{interface_name}_{wan_group}"
                                 
                                 wan_interfaces[wan_key] = {
@@ -788,6 +831,11 @@ class UniFiAPI:
                 _LOGGER.debug(f"Failed to get multi-WAN data from {endpoint}: {e}")
                 continue
         
+        # If no WAN interfaces found, try additional discovery methods
+        if not wan_interfaces:
+            _LOGGER.info("No WAN interfaces found via standard endpoints, trying additional discovery")
+            wan_interfaces = self._discover_wan_interfaces_controller()
+        
         # Determine primary WAN more intelligently  
         primary_wan = self._determine_primary_wan_controller(wan_interfaces) if wan_interfaces else None
         
@@ -800,8 +848,90 @@ class UniFiAPI:
             'primary_wan': primary_wan,
             'multi_wan_enabled': True,
             'platform_type': 'controller',
-            'detection_method': 'legacy_endpoint_scan'
+            'detection_method': 'enhanced_legacy_scan'
         }
+
+    def _discover_wan_interfaces_controller(self):
+        """Additional WAN interface discovery for self-hosted controllers"""
+        wan_interfaces = {}
+        
+        # Try additional endpoints that might reveal WAN interfaces
+        discovery_endpoints = [
+            f"{self.url}/api/s/{self.site}/stat/device",     # Device statistics
+            f"{self.url}/api/s/{self.site}/stat/sysinfo",    # System information
+            f"{self.url}/api/s/{self.site}/rest/networkconf", # Network configuration
+            f"{self.url}/api/s/{self.site}/stat/routing",    # Routing table
+        ]
+        
+        for endpoint in discovery_endpoints:
+            try:
+                _LOGGER.debug(f"Trying additional discovery endpoint: {endpoint}")
+                response = self._make_request(self.session.get, endpoint, max_retries=1)
+                data = response.json()
+                
+                if 'data' in data and len(data['data']) > 0:
+                    _LOGGER.debug(f"Got data from {endpoint}: {len(data['data'])} entries")
+                    
+                    # Look for WAN-related data in different endpoint formats
+                    for entry in data['data']:
+                        self._extract_wan_from_entry(entry, wan_interfaces, endpoint)
+                        
+            except Exception as e:
+                _LOGGER.debug(f"Discovery endpoint failed: {endpoint} - {e}")
+                continue
+        
+        return wan_interfaces
+
+    def _extract_wan_from_entry(self, entry, wan_interfaces, source_endpoint):
+        """Extract WAN interface information from various endpoint responses"""
+        # Look for common WAN indicators in the entry
+        potential_indicators = [
+            'wan', 'internet', 'gateway', 'uplink', 'eth', 'ppp'
+        ]
+        
+        # Check if this entry might be WAN-related
+        entry_str = str(entry).lower()
+        is_wan_related = any(indicator in entry_str for indicator in potential_indicators)
+        
+        if not is_wan_related:
+            return
+        
+        # Try to extract interface information
+        interface_name = (
+            entry.get('interface') or
+            entry.get('name') or
+            entry.get('wan_interface') or
+            entry.get('ifname') or
+            'unknown'
+        )
+        
+        # Look for speedtest or performance data
+        has_performance_data = any([
+            entry.get('xput_down'),
+            entry.get('xput_up'), 
+            entry.get('speedtest_ping'),
+            entry.get('tx_bytes'),
+            entry.get('rx_bytes')
+        ])
+        
+        if has_performance_data and interface_name != 'unknown':
+            wan_number = len([k for k in wan_interfaces.keys() if 'WAN' in k]) + 1
+            wan_group = f'WAN{wan_number}'
+            wan_key = f"{interface_name}_{wan_group}"
+            
+            wan_interfaces[wan_key] = {
+                'interface_name': interface_name,
+                'wan_networkgroup': wan_group,
+                'download': self._safe_float(entry.get('xput_down')),
+                'upload': self._safe_float(entry.get('xput_up')),
+                'ping': self._safe_float(entry.get('speedtest_ping')),
+                'timestamp': None,
+                'id': None,
+                'status': entry.get('status', 'discovered'),
+                'source_endpoint': source_endpoint
+            }
+            
+            _LOGGER.info(f"Discovered WAN interface via {source_endpoint}: {interface_name} -> {wan_group}")
 
     def _determine_primary_wan_udm(self, wan_interfaces):
         """Determine primary WAN interface for UDM controllers using routing and configuration data."""
@@ -1067,6 +1197,123 @@ class UniFiAPI:
         except (ValueError, TypeError):
             return None
 
+    def detect_controller_type(self):
+        """Automatically detect controller type (UDM vs self-hosted)"""
+        _LOGGER.info(f"Attempting to automatically detect controller type for URL: {self.url}")
+        
+        # Test traditional controller endpoints first (since you're using self-hosted)
+        controller_endpoints = [
+            f"{self.url}/api/s/{self.site}/stat/health", 
+            f"{self.url}/api/login"  # Traditional controller login endpoint
+        ]
+        
+        # Test UDM endpoints second
+        udm_endpoints = [
+            f"{self.url}/proxy/network/api/s/{self.site}/stat/health",
+            f"{self.url}/api/auth/login"  # UDM login endpoint
+        ]
+        
+        # Try UDM detection first (since you have a UDM)
+        try:
+            _LOGGER.info("Testing UDM endpoints...")
+            for endpoint in udm_endpoints:
+                try:
+                    _LOGGER.debug(f"Testing UDM endpoint: {endpoint}")
+                    response = self.session.get(endpoint, verify=self.verify_ssl, timeout=(10, 20))
+                    _LOGGER.info(f"UDM endpoint {endpoint} responded with status: {response.status_code}")
+                    
+                    # UDM Pro specific detection - look for UDM-specific responses
+                    if response.status_code in [200, 401, 403]:
+                        # Check if response contains UDM-specific indicators
+                        try:
+                            if response.headers.get('content-type', '').startswith('application/json'):
+                                # UDM endpoints typically return JSON even on auth failures
+                                _LOGGER.info(f"UDM Pro detected via {endpoint} (status: {response.status_code})")
+                                return 'udm'
+                        except:
+                            pass
+                        
+                        # Even without JSON, 401/403 on UDM endpoints suggests UDM
+                        if '/api/auth/' in endpoint or '/proxy/network/' in endpoint:
+                            _LOGGER.info(f"UDM Pro detected via UDM-specific endpoint {endpoint}")
+                            return 'udm'
+                            
+                except Exception as e:
+                    _LOGGER.debug(f"UDM endpoint failed: {endpoint} - {type(e).__name__}: {e}")
+                    continue
+        except Exception as e:
+            _LOGGER.info(f"UDM detection failed: {e}")
+            
+        # Try traditional controller detection only as fallback
+        try:
+            _LOGGER.info("Testing traditional controller endpoints as fallback...")
+            for endpoint in controller_endpoints:
+                try:
+                    _LOGGER.debug(f"Testing controller endpoint: {endpoint}")
+                    response = self.session.get(endpoint, verify=self.verify_ssl, timeout=(10, 20))
+                    _LOGGER.info(f"Controller endpoint {endpoint} responded with status: {response.status_code}")
+                    
+                    # Only consider it a traditional controller if UDM detection completely failed
+                    if response.status_code in [200, 401, 403] and '/proxy/' not in self.url:
+                        _LOGGER.info(f"Traditional controller detected via {endpoint} (status: {response.status_code})")
+                        return 'controller'
+                        
+                except Exception as e:
+                    _LOGGER.debug(f"Controller endpoint failed: {endpoint} - {type(e).__name__}: {e}")
+                    continue
+        except Exception as e:
+            _LOGGER.info(f"Traditional controller detection failed: {e}")
+        
+
+        
+        # Enhanced fallback detection - try login endpoints specifically
+        _LOGGER.info("Endpoint detection failed, trying login endpoint detection...")
+        
+        # Test login endpoints specifically to determine controller type
+        login_test_results = []
+        
+        # Test UDM login endpoint
+        try:
+            _LOGGER.debug("Testing UDM login endpoint...")
+            udm_login_response = self.session.get(f"{self.url}/api/auth/login", verify=self.verify_ssl, timeout=(5, 10))
+            login_test_results.append(('udm', udm_login_response.status_code))
+            _LOGGER.info(f"UDM login endpoint test: {udm_login_response.status_code}")
+        except Exception as e:
+            _LOGGER.debug(f"UDM login endpoint failed: {e}")
+            login_test_results.append(('udm', 'failed'))
+        
+        # Test traditional controller login endpoint  
+        try:
+            _LOGGER.debug("Testing traditional controller login endpoint...")
+            controller_login_response = self.session.get(f"{self.url}/api/login", verify=self.verify_ssl, timeout=(5, 10))
+            login_test_results.append(('controller', controller_login_response.status_code))
+            _LOGGER.info(f"Controller login endpoint test: {controller_login_response.status_code}")
+        except Exception as e:
+            _LOGGER.debug(f"Controller login endpoint failed: {e}")
+            login_test_results.append(('controller', 'failed'))
+        
+        # Analyze results
+        for controller_type, status in login_test_results:
+            if isinstance(status, int) and status in [200, 400, 401, 405]:  # These suggest the endpoint exists
+                _LOGGER.info(f"Login endpoint suggests {controller_type} controller (status: {status})")
+                return controller_type
+        
+        # Special logic for UDM detection - if configured as UDM, trust it unless we have strong evidence otherwise
+        if self.controller_type == 'udm':
+            # Check for UDM-specific URL patterns
+            if any(pattern in self.url.lower() for pattern in ['udm', 'cloudkey', 'unifi']):
+                _LOGGER.info(f"URL pattern suggests UDM ({self.url}), keeping UDM controller type")
+                return 'udm'
+            
+            # If we can't definitively detect otherwise and you're configured as UDM, trust the config
+            _LOGGER.info("Detection inconclusive, but configured as UDM Pro. Trusting configuration.")
+            _LOGGER.info("If you're getting 401 errors, check username/password. If getting 404 errors on speedtest endpoints, this is normal until speedtests are run.")
+            return 'udm'
+        
+        # Fallback to original setting for non-UDM configs
+        _LOGGER.warning(f"Could not automatically detect controller type, using configured: {self.controller_type}")
+        return self.controller_type
+
     def get_controller_info(self):
         """Get information about the controller type and version"""
         return {
@@ -1075,8 +1322,36 @@ class UniFiAPI:
             'url': self.url,
             'consecutive_403s': self._consecutive_403s,
             'rate_limit_backoff': self._rate_limit_backoff,
-            'last_login': self._last_login.isoformat() if self._last_login else None
+            'last_login': self._last_login.isoformat() if self._last_login else None,
         }
+
+    def _post_login_controller_detection(self):
+        """Detect controller type after login by testing actual API endpoints"""
+        _LOGGER.info("Attempting post-login controller type detection")
+        
+        # Test which health endpoint works after authentication
+        test_endpoints = [
+            ('controller', f"{self.url}/api/s/{self.site}/stat/health"),
+            ('udm', f"{self.url}/proxy/network/api/s/{self.site}/stat/health")
+        ]
+        
+        for controller_type, endpoint in test_endpoints:
+            try:
+                _LOGGER.debug(f"Testing authenticated {controller_type} endpoint: {endpoint}")
+                response = self._make_request(self.session.get, endpoint, max_retries=1)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    if 'data' in data:
+                        _LOGGER.info(f"Post-login detection successful: {controller_type} controller")
+                        return controller_type
+                        
+            except Exception as e:
+                _LOGGER.debug(f"Post-login test failed for {controller_type}: {e}")
+                continue
+        
+        _LOGGER.info("Post-login detection inconclusive, keeping current setting")
+        return self.controller_type
 
     def test_connection(self):
         """Test the connection to the controller with enhanced error handling"""

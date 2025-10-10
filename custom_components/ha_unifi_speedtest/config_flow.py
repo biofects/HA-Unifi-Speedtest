@@ -110,7 +110,7 @@ class UniFiSpeedTestConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_PASSWORD, description="UniFi Controller Password"): str,
                 vol.Optional(CONF_SITE, default='default', description="UniFi Site Name"): str,
                 vol.Optional(CONF_VERIFY_SSL, default=False, description="Verify SSL Certificate"): bool,
-                vol.Optional(CONF_CONTROLLER_TYPE, default='udm', description="Controller Type"): vol.In(['udm', 'controller']),
+                vol.Optional(CONF_CONTROLLER_TYPE, default='udm', description="Controller Type (UDM Pro/SE/Cloud Key = udm, Self-hosted = controller)"): vol.In({'udm': 'UDM Pro/SE/Cloud Key Gen2+', 'controller': 'Self-hosted Controller'}),
                 vol.Optional(CONF_ENABLE_SCHEDULING, default=DEFAULT_ENABLE_SCHEDULING, description="Enable Automatic Speed Tests"): bool,
                 vol.Optional(
                     CONF_SCHEDULE_INTERVAL, 
@@ -206,7 +206,7 @@ class UniFiSpeedTestOptionsFlow(config_entries.OptionsFlow):
             data_schema=vol.Schema({
                 vol.Optional(CONF_SITE, default=current_site, description="UniFi Site Name"): str,
                 vol.Optional(CONF_VERIFY_SSL, default=current_verify_ssl, description="Verify SSL Certificate"): bool,
-                vol.Optional(CONF_CONTROLLER_TYPE, default=current_controller_type, description="Controller Type"): vol.In(['udm', 'controller']),
+                vol.Optional(CONF_CONTROLLER_TYPE, default=current_controller_type, description="Controller Type (UDM Pro/SE/Cloud Key = udm, Self-hosted = controller)"): vol.In({'udm': 'UDM Pro/SE/Cloud Key Gen2+', 'controller': 'Self-hosted Controller'}),
                 vol.Optional(CONF_ENABLE_SCHEDULING, default=current_enable_scheduling, description="Enable Automatic Speed Tests"): bool,
                 vol.Optional(
                     CONF_SCHEDULE_INTERVAL, 
