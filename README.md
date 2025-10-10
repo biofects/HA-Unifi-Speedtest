@@ -7,7 +7,7 @@
 
 This Home Assistant custom integration provides real-time speed test monitoring for UniFi networks with **enhanced dual WAN support**. It supports all UniFi platforms including UDM Pro, UDM SE, Cloud Key, and traditional UniFi Controller software, allowing you to track download speed, upload speed, and ping directly within Home Assistant.
 
-**🆕 NEW: Multi-WAN Detection** - Automatically detects and creates separate sensors for each WAN interface in dual WAN setups, solving the issue where both WANs showed identical speeds.
+**🆕 v2.2.0: Smart Controller Detection** - User-controlled controller type selection with intelligent entity creation based on actual WAN connections.
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
 [![GitHub Release](https://img.shields.io/github/v/release/biofects/HA-Unifi-Speedtest?style=flat-square)](https://github.com/biofects/HA-Unifi-Speedtest/releases)
@@ -33,14 +33,15 @@ If you find this plugin useful, please consider donating. Your support is greatl
 
 ## ✨ Features
 
-- **🌐 Dual WAN Support**: Automatically detects and monitors multiple WAN interfaces separately
-- **🎯 Intelligent Primary WAN Detection**: Properly identifies primary WAN based on routing configuration, not just physical port order
+- **� Smart Controller Detection**: User-controlled selection between UDM and traditional controller types
+- **� Intelligent WAN Management**: UDM controllers automatically detect multiple WANs, traditional controllers use single WAN
+- **📊 Connection-Based Entities**: Only creates entities for actually connected WAN interfaces  
 - **🔧 Universal Compatibility**: Works with UDM Pro, UDM SE, UDM Base, Cloud Key Gen2+, and traditional UniFi Controllers
-- **📊 Real-time Metrics**: Monitor download speeds, upload speeds, and network latency (ping) for each WAN
+- **� Real-time Metrics**: Monitor download speeds, upload speeds, and network latency (ping) for each connected WAN
 - **🚀 Speed Test Initiation**: Start speed tests remotely via Home Assistant (traditional controllers)
 - **🏠 Home Assistant Integration**: Full integration with automations, scripts, and dashboards
-- **⚙️ Configurable**: Enable/disable multi-WAN detection, adjust polling intervals, and customize scheduling
-- **🏷️ Smart Naming**: Automatically labels devices and sensors as "Primary WAN" and "Secondary WAN"
+- **⚙️ Clean Naming**: Smart entity names based on number of connected WANs (single WAN gets clean names)
+- **🔒 Reliable Authentication**: Fixed endpoint selection prevents 401/404 errors
 
 ## 📸 Screenshots
 
@@ -123,12 +124,12 @@ Track your secondary WAN connection independently with its own set of performanc
      - Traditional Controller: `https://controller-ip:8443`
    - **Username**: UniFi Controller admin username
    - **Password**: UniFi Controller admin password
-   - **Controller Type**: Select your controller type
-     - `udm` - for UDM Pro, UDM SE, UDM Base, Cloud Key Gen2+
-     - `controller` - for traditional UniFi Controller software
+   - **Controller Type**: Select your controller type  
+     - **UDM Pro/SE/Cloud Key Gen2+** - for UniFi OS devices (supports multi-WAN detection)
+     - **Self-hosted Controller** - for traditional UniFi Controller software (single WAN mode)
    - **Site** (Optional): Site name (default: "default")
    - **SSL Verification** (Optional): Enable/disable SSL certificate verification
-   - **🆕 Enable Multi-WAN Detection**: Toggle multi-WAN sensor creation (default: enabled)
+   - **Multi-WAN Detection**: Automatically enabled for UDM controllers, disabled for traditional controllers
    - **Enable Automatic Speed Tests**: Schedule regular speed tests
    - **Speed Test Interval**: How often to run automatic tests (15-1440 minutes)
 
@@ -249,19 +250,25 @@ entities:
 - **Improved Sensor Names**: Sensors clearly indicate which is primary vs secondary
 - **Better Attributes**: Enhanced sensor attributes show primary WAN status and interface details
 
-## 🆕 Previous Updates (v2.0.1)
-### ✅ **Multi-WAN Support** (Fixed and Enhanced)
-- **Dual WAN Detection**: Automatically detects and creates separate sensors for each WAN interface
-- **Individual WAN Monitoring**: Each WAN interface gets its own dedicated sensors for download, upload, and ping
-- **Universal Compatibility**: Works with all UniFi controller types (UDM Pro, UDM SE, UDM Base, Cloud Key Gen2+, and traditional software)
-- **Automatic Fallback**: Gracefully falls back to single WAN mode when only one interface is detected
-- **Optional Configuration**: Multi-WAN support can be enabled/disabled during setup
+## 🆕 What's New in v2.2.0
 
-### ✅ **Enhanced Controller Compatibility**
-- **UDM Pro/SE Enhanced**: Improved API handling for UniFi OS-based controllers
-- **Traditional Controller Optimized**: Better support for legacy UniFi Controller software
-- **Cloud Key Gen2+ Support**: Full compatibility with Cloud Key Generation 2 Plus controllers
-- **Unified API Interface**: Single codebase handles all controller variations seamlessly
+### ✅ **User-Controlled Controller Type Selection**
+- **No More Auto-Detection**: Eliminated confusing automatic controller detection that could misidentify your setup
+- **Clear Controller Options**: Choose between "UDM Pro/SE/Cloud Key Gen2+" or "Self-hosted Controller"  
+- **Reliable Endpoint Selection**: Always uses the correct API endpoints for your controller type
+- **Fixed Authentication Issues**: Resolved 401/404 errors caused by incorrect endpoint detection
+
+### ✅ **Intelligent WAN Interface Management**
+- **UDM Multi-WAN Logic**: UDM controllers automatically check for multiple WAN connections
+- **Connection-Based Entity Creation**: Only creates entities for actually connected WAN interfaces
+- **Clean Single WAN Naming**: When only one WAN is connected, gets clean names like "Download Speed" instead of "Download Speed WAN1"
+- **Traditional Controller Single WAN**: Self-hosted controllers use single WAN mode with appropriate endpoints
+
+### ✅ **Enhanced User Experience**  
+- **Eliminated Unknown Entities**: No more persistent "Unknown" entities that couldn't be removed
+- **Better Configuration UI**: Clear descriptions help you choose the right controller type
+- **Improved Error Messages**: More helpful messages when no speedtest data is available
+- **Predictable Behavior**: Integration behaves consistently based on your controller type selection
 
 ### ✅ **Previous Updates (v1.4.0)**
 - **Added Poll Control**: Configurable poll interval

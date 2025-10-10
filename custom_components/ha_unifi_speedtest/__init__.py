@@ -39,7 +39,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Test the connection and login
     try:
         await hass.async_add_executor_job(api.login)
-        _LOGGER.info("API login completed successfully")
+        _LOGGER.info(f"API login completed successfully for {api.controller_type} controller")
     except Exception as e:
         _LOGGER.error(f"Failed to connect to UniFi controller: {e}")
         return False

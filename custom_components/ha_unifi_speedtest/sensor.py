@@ -178,44 +178,88 @@ async def async_setup_entry(
     _LOGGER.info("Coordinator created, refreshing config entry.")
     await coordinator.async_config_entry_first_refresh()
 
-    # Check if multi-WAN is enabled and create appropriate sensors
-    enable_multi_wan = config_entry.options.get(CONF_ENABLE_MULTI_WAN, 
-                                               config_entry.data.get(CONF_ENABLE_MULTI_WAN, True))
-    
+    # Create sensors based on user-configured controller type
+    _LOGGER.info(f"Creating sensors for configured controller type: {api.controller_type}")
+
+    # Create sensors based on controller type and actual WAN connections
     sensors = []
+    coordinator_data = coordinator.data
     
-    if enable_multi_wan:
-        # Check if we have multi-WAN data
-        coordinator_data = coordinator.data
+    if api.controller_type == 'udm':
+        # UDM controllers support dual-WAN - check for multiple WAN interfaces
+        _LOGGER.info("UDM controller detected - checking for multiple WAN interfaces")
+        
         if (coordinator_data and 
             isinstance(coordinator_data, dict) and 
             'multi_wan_enabled' in coordinator_data and 
             coordinator_data.get('wan_interfaces')):
             
-            # Create sensors for each WAN interface
             wan_interfaces = coordinator_data['wan_interfaces']
-            _LOGGER.info(f"Creating sensors for {len(wan_interfaces)} WAN interface(s)")
+            connected_wans = []
             
-            for i, wan_interface in enumerate(wan_interfaces, 1):
-                interface_name = wan_interface.get('interface_name', f'wan{i}')
-                wan_group = wan_interface.get('wan_networkgroup', f'WAN{i}')
+            # Check which WANs are actually connected and have data
+            for i, wan_interface in enumerate(wan_interfaces):
+                interface_name = wan_interface.get('interface_name', f'wan{i+1}')
+                wan_group = wan_interface.get('wan_networkgroup', f'WAN{i+1}')
                 
+                # Check if this WAN is connected (has any data or shows as active)
+                has_data = any([
+                    wan_interface.get('download') is not None,
+                    wan_interface.get('upload') is not None,
+                    wan_interface.get('ping') is not None
+                ])
+                
+                status = wan_interface.get('status', 'unknown')
+                is_connected = has_data or status in ['ok', 'active', 'up', 'connected']
+                
+                if is_connected:
+                    connected_wans.append((i, wan_interface, interface_name, wan_group))
+                    _LOGGER.info(f"Connected WAN found: {wan_group} ({interface_name})")
+                else:
+                    _LOGGER.info(f"WAN {wan_group} ({interface_name}) appears disconnected or no data")
+            
+            if len(connected_wans) >= 2:
+                # Create entities for both connected WANs
+                _LOGGER.info(f"Creating entities for {len(connected_wans)} connected WAN interfaces")
+                for i, wan_interface, interface_name, wan_group in connected_wans:
+                    sensors.extend([
+                        UniFiSpeedTestSensorMultiWAN(coordinator, f"Download Speed {wan_group}", "download", interface_name, wan_group, i),
+                        UniFiSpeedTestSensorMultiWAN(coordinator, f"Upload Speed {wan_group}", "upload", interface_name, wan_group, i),
+                        UniFiSpeedTestSensorMultiWAN(coordinator, f"Ping {wan_group}", "ping", interface_name, wan_group, i),
+                    ])
+                    
+            elif len(connected_wans) == 1:
+                # Only one WAN connected - create single device with cleaner names
+                _LOGGER.info("Only one WAN connected - creating single WAN device")
+                i, wan_interface, interface_name, wan_group = connected_wans[0]
                 sensors.extend([
-                    UniFiSpeedTestSensorMultiWAN(coordinator, f"Download Speed {wan_group}", "download", interface_name, wan_group, i-1),
-                    UniFiSpeedTestSensorMultiWAN(coordinator, f"Upload Speed {wan_group}", "upload", interface_name, wan_group, i-1),
-                    UniFiSpeedTestSensorMultiWAN(coordinator, f"Ping {wan_group}", "ping", interface_name, wan_group, i-1),
+                    UniFiSpeedTestSensorMultiWAN(coordinator, f"Download Speed", "download", interface_name, "Primary WAN", i),
+                    UniFiSpeedTestSensorMultiWAN(coordinator, f"Upload Speed", "upload", interface_name, "Primary WAN", i),
+                    UniFiSpeedTestSensorMultiWAN(coordinator, f"Ping", "ping", interface_name, "Primary WAN", i),
+                ])
+            else:
+                # No connected WANs detected - fall back to legacy sensors and warn user
+                _LOGGER.warning("No connected WAN interfaces detected on UDM")
+                _LOGGER.warning("This may indicate no speedtests have been run yet")
+                _LOGGER.warning("Creating basic sensors - run a speedtest from UDM interface to populate data")
+                sensors.extend([
+                    UniFiSpeedTestSensor(coordinator, "Download Speed", "download"),
+                    UniFiSpeedTestSensor(coordinator, "Upload Speed", "upload"),
+                    UniFiSpeedTestSensor(coordinator, "Ping", "ping"),
                 ])
         else:
-            # Fallback to legacy sensors if no multi-WAN data available
-            _LOGGER.info("Multi-WAN enabled but no multi-WAN data found, creating legacy sensors")
+            # No multi-WAN data available for UDM - create legacy sensors
+            _LOGGER.info("UDM controller but no multi-WAN data available, creating single device")
+            _LOGGER.info("Run a speedtest from the UDM interface to populate speedtest data")
             sensors.extend([
                 UniFiSpeedTestSensor(coordinator, "Download Speed", "download"),
                 UniFiSpeedTestSensor(coordinator, "Upload Speed", "upload"),
                 UniFiSpeedTestSensor(coordinator, "Ping", "ping"),
             ])
+    
     else:
-        # Create legacy sensors
-        _LOGGER.info("Multi-WAN disabled, creating legacy sensors")
+        # Traditional controller - only supports single WAN
+        _LOGGER.info("Traditional controller detected - creating single WAN device")
         sensors.extend([
             UniFiSpeedTestSensor(coordinator, "Download Speed", "download"),
             UniFiSpeedTestSensor(coordinator, "Upload Speed", "upload"),
