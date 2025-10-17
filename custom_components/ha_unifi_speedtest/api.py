@@ -295,9 +295,14 @@ class UniFiAPI:
                     _LOGGER.error(f"Request failed after {max_retries + 1} attempts: {e}")
                     raise
 
-    def start_speed_test(self):
-        """Start speed test on the appropriate controller type with enhanced error handling"""
-        _LOGGER.info(f"Starting speed test on {self.controller_type} controller at {datetime.now()}")
+    def start_speed_test(self, interface_name=None):
+        """Start speed test on the appropriate controller type with enhanced error handling
+        
+        Args:
+            interface_name: Optional specific WAN interface to test (e.g., 'eth9', 'eth8')
+                          If None and multi_wan is enabled on UDM, will test all WAN interfaces sequentially
+        """
+        _LOGGER.info(f"Starting speed test on {self.controller_type} controller at {datetime.now()}, interface: {interface_name or 'auto'}")
         
         # Check if we're hitting too many 403s
         if self._consecutive_403s > self._max_consecutive_403s:
@@ -305,8 +310,17 @@ class UniFiAPI:
         
         try:
             if self.controller_type == 'udm':
-                self._start_speed_test_udm()
+                if interface_name:
+                    # Test specific WAN interface
+                    self._start_speed_test_udm(interface_name=interface_name)
+                elif self.enable_multi_wan:
+                    # Test all WAN interfaces sequentially with delays
+                    self._start_multi_wan_speed_tests()
+                else:
+                    # Test primary/default WAN only
+                    self._start_speed_test_udm()
             else:
+                # Traditional controller - single WAN
                 self._start_speed_test_controller()
             _LOGGER.info("Speed test initiation completed successfully")
         except Exception as e:
@@ -343,12 +357,147 @@ class UniFiAPI:
             _LOGGER.warning(f"Failed to get CSRF token: {e}")
             return None
 
-    def _start_speed_test_udm(self):
-        """Start speed test on UDM Pro with enhanced error handling"""
-        # Use UDM speedtest method as configured
+    def get_wan_interfaces(self):
+        """Get list of available WAN interfaces from UDM controller
+        
+        Returns:
+            list: List of WAN interface dictionaries with 'name', 'type', and 'network_group' keys
+                  Returns empty list if unable to detect or if not a UDM controller
+        """
+        if self.controller_type != 'udm':
+            _LOGGER.debug("get_wan_interfaces: Not a UDM controller, returning empty list")
+            return []
+        
+        wan_interfaces = []
+        
+        try:
+            # Try to get interface information from the network configuration
+            endpoint = f"{self.url}/proxy/network/api/s/{self.site}/rest/networkconf"
+            _LOGGER.debug(f"Fetching WAN interfaces from: {endpoint}")
+            
+            response = self._make_request(self.session.get, endpoint, max_retries=1)
+            data = response.json()
+            
+            if 'data' in data:
+                wan_count = 0
+                for network in data['data']:
+                    # Look for WAN networks
+                    purpose = network.get('purpose', '')
+                    wan_type = network.get('wan_type', '')
+                    name = network.get('name', '')
+                    network_group = network.get('networkgroup', '') or network.get('wan_networkgroup', '')
+                    
+                    # Identify WAN interfaces
+                    if purpose == 'wan' or 'wan' in name.lower():
+                        wan_count += 1
+                        interface_name = network.get('wan_egress_qos', {}).get('interface') or network.get('wan_smartq', {}).get('interface')
+                        
+                        if not interface_name:
+                            # Try alternative interface detection
+                            interface_name = network.get('ifname') or network.get('interface')
+                        
+                        # If no interface name found, use common UDM mapping
+                        if not interface_name:
+                            # UDM Pro standard mapping: eth9 = WAN1, eth8 = WAN2
+                            interface_name = 'eth9' if wan_count == 1 else f'eth{10 - wan_count}'
+                            _LOGGER.info(f"No interface in config, using UDM Pro default mapping: {name} -> {interface_name}")
+                        
+                        wan_info = {
+                            'name': interface_name,
+                            'type': wan_type or 'dhcp',
+                            'network_group': network_group or 'WAN',
+                            'network_name': name
+                        }
+                        wan_interfaces.append(wan_info)
+                        _LOGGER.info(f"Detected WAN interface: {interface_name} ({name}, group: {network_group})")
+            
+            if not wan_interfaces:
+                # Fallback: try to detect from port configuration
+                port_endpoint = f"{self.url}/proxy/network/api/s/{self.site}/rest/portconf"
+                _LOGGER.debug(f"Trying fallback WAN detection from: {port_endpoint}")
+                
+                response = self._make_request(self.session.get, port_endpoint, max_retries=1)
+                data = response.json()
+                
+                if 'data' in data:
+                    wan_count = 0
+                    for port in data['data']:
+                        # Look for WAN ports
+                        if 'wan' in port.get('name', '').lower() or port.get('wan_networkgroup'):
+                            wan_count += 1
+                            interface_name = port.get('ifname', f'eth{port.get("port_idx", wan_count)}')
+                            wan_info = {
+                                'name': interface_name,
+                                'type': 'ethernet',
+                                'network_group': port.get('wan_networkgroup', f'WAN{wan_count}'),
+                                'network_name': port.get('name', f'WAN {wan_count}')
+                            }
+                            wan_interfaces.append(wan_info)
+                            _LOGGER.info(f"Detected WAN interface from ports: {interface_name}")
+            
+            if wan_interfaces:
+                _LOGGER.info(f"Successfully detected {len(wan_interfaces)} WAN interface(s): {[w['name'] for w in wan_interfaces]}")
+            else:
+                # Final fallback: assume common UDM interfaces
+                _LOGGER.warning("Could not detect WAN interfaces from API, using common defaults")
+                wan_interfaces = [
+                    {'name': 'eth9', 'type': 'ethernet', 'network_group': 'WAN', 'network_name': 'WAN1'},
+                    {'name': 'eth8', 'type': 'ethernet', 'network_group': 'WAN2', 'network_name': 'WAN2'}
+                ]
+            
+            return wan_interfaces
+            
+        except Exception as e:
+            _LOGGER.warning(f"Failed to get WAN interfaces: {e}")
+            # Return common default interfaces as fallback
+            return [
+                {'name': 'eth9', 'type': 'ethernet', 'network_group': 'WAN', 'network_name': 'WAN1'},
+                {'name': 'eth8', 'type': 'ethernet', 'network_group': 'WAN2', 'network_name': 'WAN2'}
+            ]
+
+    def _start_multi_wan_speed_tests(self):
+        """Start speed tests on all available WAN interfaces sequentially with rate limiting"""
+        wan_interfaces = self.get_wan_interfaces()
+        
+        if not wan_interfaces:
+            _LOGGER.warning("No WAN interfaces detected, falling back to single speed test")
+            self._start_speed_test_udm()
+            return
+        
+        _LOGGER.info(f"Starting multi-WAN speed tests for {len(wan_interfaces)} interface(s)")
+        
+        for idx, wan_info in enumerate(wan_interfaces):
+            interface_name = wan_info['name']
+            network_name = wan_info.get('network_name', interface_name)
+            
+            try:
+                _LOGGER.info(f"Testing WAN interface {idx+1}/{len(wan_interfaces)}: {network_name} ({interface_name})")
+                self._start_speed_test_udm(interface_name=interface_name)
+                
+                # Add delay between WAN tests to avoid rate limiting (except after the last one)
+                if idx < len(wan_interfaces) - 1:
+                    delay = 15  # 15 seconds between WAN tests
+                    _LOGGER.info(f"Waiting {delay} seconds before testing next WAN interface...")
+                    time.sleep(delay)
+                    
+            except Exception as e:
+                _LOGGER.error(f"Failed to test WAN interface {network_name} ({interface_name}): {e}")
+                # Continue with next interface even if one fails
+                continue
+        
+        _LOGGER.info("Multi-WAN speed tests completed")
+
+    def _start_speed_test_udm(self, interface_name=None):
+        """Start speed test on UDM Pro with enhanced error handling
+        
+        Args:
+            interface_name: Optional specific interface to test (e.g., 'eth9', 'eth8')
+        """
         
         endpoint = f"{self.url}/proxy/network/api/s/{self.site}/cmd/devmgr/speedtest"
-        _LOGGER.info(f"Starting UDM Pro speed test at endpoint: {endpoint}")
+        
+        interface_msg = f" on interface {interface_name}" if interface_name else ""
+        _LOGGER.info(f"Starting UDM Pro speed test{interface_msg} at endpoint: {endpoint}")
         
         # Prepare headers to match browser request
         headers = {
@@ -369,16 +518,27 @@ class UniFiAPI:
             _LOGGER.debug(f"Could not obtain CSRF token, continuing without: {e}")
         
         # Try different payloads in order of preference
-        payloads_to_try = [
+        payloads_to_try = []
+        
+        if interface_name:
+            # When testing a specific interface, include it in the payload
+            payloads_to_try.append({"interface": interface_name})
+            payloads_to_try.append({"interface_name": interface_name})
+            payloads_to_try.append({"cmd": "speedtest", "interface": interface_name})
+            payloads_to_try.append({"cmd": "speedtest", "interface_name": interface_name})
+        
+        # Also try generic payloads as fallback
+        payloads_to_try.extend([
             {},  # Empty JSON object
             {"cmd": "speedtest"},  # Traditional command format
-        ]
+        ])
         
         last_exception = None
         
         for i, payload in enumerate(payloads_to_try):
             try:
-                _LOGGER.debug(f"Attempting UDM Pro speed test with payload {i+1}: {payload}")
+                payload_desc = f"payload {i+1}: {payload}" if payload else "empty payload"
+                _LOGGER.debug(f"Attempting UDM Pro speed test with {payload_desc}")
                 response = self._make_request(
                     self.session.post, 
                     endpoint, 
@@ -393,7 +553,7 @@ class UniFiAPI:
                 except ValueError:
                     _LOGGER.info("UDM Pro speed test initiated (no JSON response)")
                 
-                _LOGGER.info("UDM Pro speed test started successfully")
+                _LOGGER.info(f"UDM Pro speed test started successfully{interface_msg}")
                 return  # Success, exit the function
                 
             except Exception as e:
@@ -402,7 +562,7 @@ class UniFiAPI:
                 continue  # Try next payload
         
         # If we got here, all attempts failed
-        _LOGGER.error(f"All UDM Pro speed test attempts failed. Last error: {last_exception}")
+        _LOGGER.error(f"All UDM Pro speed test attempts failed{interface_msg}. Last error: {last_exception}")
         raise last_exception
 
     def _start_speed_test_controller(self):
@@ -654,7 +814,8 @@ class UniFiAPI:
                                     'download': self._safe_float(entry.get('download_mbps')),
                                     'upload': self._safe_float(entry.get('upload_mbps')),
                                     'ping': self._safe_float(entry.get('latency_ms')),
-                                    'timestamp': entry.get('time'),
+                                    'timestamp': self._format_timestamp(entry.get('time')),
+                                    'status': entry.get('status_text', entry.get('status', 'completed')),
                                     'id': entry.get('id'),
                                     'source_endpoint': endpoint
                                 }
@@ -755,7 +916,8 @@ class UniFiAPI:
                                     'download': self._safe_float(entry.get('xput_down', entry.get('download_mbps'))),
                                     'upload': self._safe_float(entry.get('xput_up', entry.get('upload_mbps'))),
                                     'ping': self._safe_float(entry.get('speedtest_ping', entry.get('latency_ms'))),
-                                    'timestamp': entry.get('time'),
+                                    'timestamp': self._format_timestamp(entry.get('time')),
+                                    'status': entry.get('status_text', entry.get('status', 'completed')),
                                     'id': entry.get('id'),
                                     'source_endpoint': endpoint
                                 }
@@ -1195,6 +1357,26 @@ class UniFiAPI:
         try:
             return float(value)
         except (ValueError, TypeError):
+            return None
+
+    def _format_timestamp(self, timestamp_ms):
+        """Convert Unix timestamp in milliseconds to ISO format string
+        
+        Args:
+            timestamp_ms: Unix timestamp in milliseconds (from UniFi API)
+            
+        Returns:
+            ISO formatted datetime string or None if invalid
+        """
+        if timestamp_ms is None:
+            return None
+        try:
+            # Convert milliseconds to seconds
+            timestamp_sec = int(timestamp_ms) / 1000
+            # Convert to datetime and format as ISO string
+            dt = datetime.fromtimestamp(timestamp_sec)
+            return dt.isoformat()
+        except (ValueError, TypeError, OSError):
             return None
 
     def detect_controller_type(self):

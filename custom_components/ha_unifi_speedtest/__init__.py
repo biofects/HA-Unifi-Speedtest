@@ -4,7 +4,7 @@ from homeassistant.helpers import config_validation as cv
 import voluptuous as vol
 import logging
 
-from .const import DOMAIN, INTEGRATION_NAME, SERVICE_START_SPEED_TEST, SERVICE_GET_SPEED_TEST_STATUS, CONF_SCHEDULE_INTERVAL, CONF_ENABLE_SCHEDULING, CONF_ENABLE_MULTI_WAN
+from .const import DOMAIN, INTEGRATION_NAME, SERVICE_START_SPEED_TEST, SERVICE_GET_SPEED_TEST_STATUS, SERVICE_GET_WAN_INTERFACES, CONF_SCHEDULE_INTERVAL, CONF_ENABLE_SCHEDULING, CONF_ENABLE_MULTI_WAN
 from .api import UniFiAPI
 
 _LOGGER = logging.getLogger(__name__)
@@ -12,10 +12,17 @@ _LOGGER = logging.getLogger(__name__)
 # Service schema for start_speed_test
 START_SPEED_TEST_SCHEMA = vol.Schema({
     vol.Optional("config_entry_id"): cv.string,
+    vol.Optional("interface_name"): cv.string,
+})
+
+# Service schema for get_wan_interfaces
+GET_WAN_INTERFACES_SCHEMA = vol.Schema({
+    vol.Optional("config_entry_id"): cv.string,
 })
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up the HA Unifi Speedtest integration from a config entry."""
+    _LOGGER.warning(f"[INIT] Starting async_setup_entry for HA Unifi Speedtest integration: {entry.entry_id}")
     _LOGGER.info(f"Starting async_setup_entry for HA Unifi Speedtest integration: {entry.entry_id}")
     
     # Initialize data storage
@@ -54,22 +61,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Register services (only register once for the domain)
     if not hass.services.has_service(DOMAIN, SERVICE_START_SPEED_TEST):
-        async def start_speed_test(call: ServiceCall) -> None:
+        async def start_speed_test(call: ServiceCall) -> dict:
             """Handle the start speed test service call."""
             config_entry_id = call.data.get("config_entry_id")
+            interface_name = call.data.get("interface_name")  # Optional WAN interface parameter
             
-            # If no specific config entry ID provided, use the first available
+            # If no specific config entry ID provided, find the API instance
             if config_entry_id is None:
                 if not hass.data[DOMAIN]:
                     _LOGGER.error("No UniFi Speed Test integrations configured")
-                    return
-                config_entry_id = next(iter(hass.data[DOMAIN].keys()))
+                    return {"error": "No UniFi Speed Test integrations configured"}
+                # Find the first actual config entry (not a tracker or listener)
+                for key, value in hass.data[DOMAIN].items():
+                    if not key.endswith('_tracker') and not key.endswith('_listener') and not key.endswith('_wan_interfaces') and hasattr(value, 'start_speed_test'):
+                        config_entry_id = key
+                        break
+                if config_entry_id is None:
+                    _LOGGER.error("No valid UniFi API instance found")
+                    return {"error": "No valid UniFi API instance found"}
                 _LOGGER.info(f"No config_entry_id specified, using: {config_entry_id}")
             
             # Get the API instance
             if config_entry_id not in hass.data[DOMAIN]:
                 _LOGGER.error(f"Config entry {config_entry_id} not found")
-                return
+                return {"error": f"Config entry {config_entry_id} not found"}
                 
             api_instance = hass.data[DOMAIN][config_entry_id]
             
@@ -81,28 +96,38 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             if not hasattr(api_instance, 'start_speed_test'):
                 _LOGGER.error(f"Invalid API instance retrieved. Type: {type(api_instance)}, Value: {api_instance}")
                 _LOGGER.error(f"Available data keys: {list(hass.data[DOMAIN].keys())}")
-                return
+                return {"error": "Invalid API instance"}
             
             # Get the tracker if it exists
             tracker_key = f"{config_entry_id}_tracker"
             tracker = hass.data[DOMAIN].get(tracker_key)
             
-            _LOGGER.info(f"Manual speed test requested for config entry: {config_entry_id}")
+            interface_msg = f" on interface {interface_name}" if interface_name else " on all WAN interfaces"
+            _LOGGER.info(f"Manual speed test requested for config entry: {config_entry_id}{interface_msg}")
             
             try:
                 # Record attempt if tracker exists (manual = False for automated parameter)
                 if tracker:
                     tracker.record_attempt(automated=False)
                 
-                # Start the speed test
-                await hass.async_add_executor_job(api_instance.start_speed_test)
+                # Start the speed test with optional interface parameter
+                result = await hass.async_add_executor_job(api_instance.start_speed_test, interface_name)
                 
                 # Record success if tracker exists
                 if tracker:
                     tracker.record_success(automated=False)
                     await tracker.async_save()  # Save after recording
                 
-                _LOGGER.info("Manual speed test started successfully")
+                _LOGGER.info(f"Manual speed test started successfully{interface_msg}")
+                
+                # Return success response
+                return {
+                    "success": True,
+                    "message": f"Speed test started successfully{interface_msg}",
+                    "config_entry_id": config_entry_id,
+                    "interface": interface_name if interface_name else "all WANs",
+                    "result": result if result else "Test initiated"
+                }
                 
             except Exception as e:
                 # Record failure if tracker exists
@@ -110,24 +135,35 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     tracker.record_failure(automated=False)
                     await tracker.async_save()  # Save after recording
                     
-                _LOGGER.error(f"Failed to start manual speed test: {e}")
-                raise
+                _LOGGER.error(f"Failed to start manual speed test{interface_msg}: {e}")
+                return {
+                    "success": False,
+                    "error": str(e),
+                    "message": f"Failed to start speed test{interface_msg}"
+                }
 
-        async def get_speed_test_status(call: ServiceCall) -> None:
+        async def get_speed_test_status(call: ServiceCall) -> dict:
             """Handle the get speed test status service call."""
             config_entry_id = call.data.get("config_entry_id")
             
-            # If no specific config entry ID provided, use the first available
+            # If no specific config entry ID provided, find the API instance
             if config_entry_id is None:
                 if not hass.data[DOMAIN]:
                     _LOGGER.error("No UniFi Speed Test integrations configured")
-                    return
-                config_entry_id = next(iter(hass.data[DOMAIN].keys()))
+                    return {"error": "No UniFi Speed Test integrations configured"}
+                # Find the first actual config entry (not a tracker or listener)
+                for key, value in hass.data[DOMAIN].items():
+                    if not key.endswith('_tracker') and not key.endswith('_listener') and not key.endswith('_wan_interfaces') and hasattr(value, 'get_speed_test_status'):
+                        config_entry_id = key
+                        break
+                if config_entry_id is None:
+                    _LOGGER.error("No valid UniFi API instance found")
+                    return {"error": "No valid UniFi API instance found"}
             
             # Get the API instance
             if config_entry_id not in hass.data[DOMAIN]:
                 _LOGGER.error(f"Config entry {config_entry_id} not found")
-                return
+                return {"error": f"Config entry {config_entry_id} not found"}
                 
             api_instance = hass.data[DOMAIN][config_entry_id]
             
@@ -136,8 +172,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 status = await hass.async_add_executor_job(api_instance.get_speed_test_status)
                 hass.states.async_set("sensor.unifi_speed_test_status", status)
                 _LOGGER.info(f"Speed test status retrieved: {status}")
+                return {
+                    "success": True,
+                    "status": status,
+                    "config_entry_id": config_entry_id
+                }
             except Exception as e:
                 _LOGGER.error(f"Failed to get speed test status: {e}")
+                return {
+                    "success": False,
+                    "error": str(e)
+                }
 
         # Register the services
         hass.services.async_register(
@@ -145,14 +190,80 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             SERVICE_START_SPEED_TEST,
             start_speed_test,
             schema=START_SPEED_TEST_SCHEMA,
+            supports_response=True,
         )
+        
+        async def get_wan_interfaces(call: ServiceCall) -> dict:
+            """Handle the get WAN interfaces service call."""
+            config_entry_id = call.data.get("config_entry_id")
+            
+            # If no specific config entry ID provided, find the API instance
+            if config_entry_id is None:
+                if not hass.data[DOMAIN]:
+                    _LOGGER.error("No UniFi Speed Test integrations configured")
+                    return {"error": "No UniFi Speed Test integrations configured"}
+                # Find the first actual config entry (not a tracker or listener)
+                for key, value in hass.data[DOMAIN].items():
+                    if not key.endswith('_tracker') and not key.endswith('_listener') and not key.endswith('_wan_interfaces') and hasattr(value, 'get_wan_interfaces'):
+                        config_entry_id = key
+                        break
+                if config_entry_id is None:
+                    _LOGGER.error("No valid UniFi API instance found")
+                    return {"error": "No valid UniFi API instance found"}
+            
+            # Get the API instance
+            if config_entry_id not in hass.data[DOMAIN]:
+                _LOGGER.error(f"Config entry {config_entry_id} not found")
+                return {"error": f"Config entry {config_entry_id} not found"}
+                
+            api_instance = hass.data[DOMAIN][config_entry_id]
+            
+            try:
+                # Get WAN interfaces
+                wan_interfaces = await hass.async_add_executor_job(api_instance.get_wan_interfaces)
+                
+                _LOGGER.info(f"WAN Interfaces for config entry {config_entry_id}:")
+                wan_list = []
+                for idx, wan in enumerate(wan_interfaces, 1):
+                    network_name = wan.get('network_name', wan['name'])
+                    interface = wan['name']
+                    wan_type = wan.get('type', 'unknown')
+                    network_group = wan.get('network_group', 'unknown')
+                    
+                    _LOGGER.info(f"  {idx}. {network_name}: {interface} (type: {wan_type}, group: {network_group})")
+                    wan_list.append(f"{network_name} ({interface}, {network_group})")
+                
+                # Store in hass.data for access by other components if needed
+                hass.data[DOMAIN][f"{config_entry_id}_wan_interfaces"] = wan_interfaces
+                
+                # Return the WAN interface information for display in the UI
+                return {
+                    "wan_count": len(wan_interfaces),
+                    "wan_interfaces": wan_list,
+                    "details": wan_interfaces
+                }
+                
+            except Exception as e:
+                _LOGGER.error(f"Failed to get WAN interfaces: {e}")
+                return {"error": str(e)}
+        
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_GET_WAN_INTERFACES,
+            get_wan_interfaces,
+            schema=GET_WAN_INTERFACES_SCHEMA,
+            supports_response=True,
+        )
+        
         hass.services.async_register(
             DOMAIN,
             SERVICE_GET_SPEED_TEST_STATUS,
             get_speed_test_status,
             schema=START_SPEED_TEST_SCHEMA,  # Same schema for consistency
+            supports_response=True,
         )
-        _LOGGER.info("Services registered: start_speed_test, get_speed_test_status")
+        
+        _LOGGER.info("Services registered: start_speed_test, get_speed_test_status, get_wan_interfaces")
 
     return True
 

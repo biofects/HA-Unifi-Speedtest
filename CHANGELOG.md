@@ -2,30 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
-## [2.2.0] - 2025-10-10
-
-### Major Changes
-- **Controller Type Selection**: Removed automatic controller detection in favor of user-controlled selection
-- **UDM Multi-WAN Logic**: UDM controllers now intelligently detect multiple WAN connections and create entities accordingly
-- **Traditional Controller Support**: Self-hosted controllers now use single-WAN mode with appropriate endpoints
+## [2.2.0] - 2025-10-17
 
 ### Added
-- **Smart Entity Creation**: Only creates entities for actually connected WAN interfaces
-- **Improved UI**: Enhanced configuration flow with clear controller type descriptions
-- **Connection-Based Detection**: For UDMs, detects which WANs are connected and only creates entities for active connections
-- **Clean Naming**: Single WAN connections get clean names without WAN number suffixes
+- **Interface-Specific Testing**: Added `interface_name` parameter to `start_speed_test` service for testing specific WAN interfaces
+- **WAN Interface Detection Service**: New `get_wan_interfaces` service returns detailed WAN configuration
+- **Service Response Data**: All services now return response data for automation use
+- **UDM Pro Interface Mapping**: Enhanced WAN detection with standard UDM Pro mapping (Internet 1→eth9, Internet 2→eth8)
+- **Rate Limiting Protection**: 15-second delays between sequential WAN tests to prevent API rate limiting
 
 ### Fixed
-- **Authentication Issues**: Resolved 401/404 errors caused by incorrect controller type detection
-- **Endpoint Selection**: Fixed issues where UDM endpoints were being used for self-hosted controllers and vice versa
-- **Entity Creation**: Eliminated creation of "Unknown" entities that couldn't be removed
-- **Multi-WAN Detection**: Improved detection of dual-WAN setups on UDM devices
+- **Dual WAN Speed Testing**: UDM controllers now support testing both WAN interfaces sequentially
+- **Scheduler Initialization**: Fixed issue where Python module caching prevented scheduler from initializing (requires full HA restart)
+- **Timestamp Display**: Converted Unix milliseconds to human-readable format (e.g., "October 17, 2025 at 1:07:54 PM")
+- **Status Field**: Fixed status showing "unknown" instead of "completed" for speed tests
+- **Type Hints**: Corrected `unit_of_measurement` type hints to `str | None` for Home Assistant 2025.x compatibility
+- **Software Controller Support**: Fixed sensor loading errors for traditional UniFi controllers
 
 ### Changed
-- **Configuration Options**: Controller type selection now shows "UDM Pro/SE/Cloud Key Gen2+" vs "Self-hosted Controller"
-- **API Logic**: Simplified API calls to use user-specified controller type without auto-detection
-- **Sensor Logic**: UDM controllers check for multiple WANs, traditional controllers use single WAN mode
-- **Error Handling**: Better error messages and fallback behavior when no speedtest data is available
+- **Multi-WAN Testing**: Sequential testing with rate limiting replaces parallel testing to avoid 403 errors
+- **Service Schema**: Updated service definitions with proper response support
+- **Debug Logging**: Added detailed scheduler initialization logging for troubleshooting
+
+### Technical Notes
+- Home Assistant integration "reload" doesn't clear Python module cache - full Docker restart required for code updates
+- Scheduler activates on integration load, first test runs after configured interval (default 90 minutes)
+- Automated counter only increments when scheduler runs tests, not on reload/restart
 
 ## [2.1.1] - 2025-09-12
 

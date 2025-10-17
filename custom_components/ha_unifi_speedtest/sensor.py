@@ -32,6 +32,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback
 ) -> bool:
     """Set up the UniFi Speed Test sensors."""
+    _LOGGER.warning("[SENSOR] Setting up UniFi Speed Test sensors - ENTRY POINT")
     _LOGGER.info("Setting up UniFi Speed Test sensors.")
     # Retrieve the API instance from hass.data
     api = hass.data[DOMAIN][config_entry.entry_id]
@@ -157,12 +158,14 @@ async def async_setup_entry(
 
     # Set up automatic speed tests if enabled
     if enable_scheduling:
+        _LOGGER.warning(f"[SCHEDULER] Setting up automatic speed tests for {api.controller_type} controller every {schedule_interval} minutes")
         _LOGGER.info(f"Setting up automatic speed tests for {api.controller_type} controller every {schedule_interval} minutes")
         _LOGGER.info(f"Data will be polled every {polling_interval} minutes")
         
         # Schedule the speed test at user-defined interval
         interval = timedelta(minutes=schedule_interval)
         remove_scheduled_listener = async_track_time_interval(hass, run_scheduled_speedtest, interval)
+        _LOGGER.warning(f"[SCHEDULER] Speed test scheduled every {schedule_interval} minutes - SCHEDULER ACTIVE!")
         _LOGGER.info(f"Speed test scheduled every {schedule_interval} minutes")
 
         # Store the listener removal function so we can clean it up later
@@ -448,12 +451,14 @@ class UniFiSpeedTestSensor(CoordinatorEntity, SensorEntity):
         return value
 
     @property
-    def unit_of_measurement(self) -> str:
+    def unit_of_measurement(self) -> str | None:
         """Return the unit of measurement following Home Assistant standards."""
         if self._data_key in ["download", "upload"]:
             return "Mbit/s"  # Changed from "Mbps" to "Mbit/s" to match HA standards
         elif self._data_key == "ping":
             return "ms"
+        # Log warning if sensor has unexpected data_key
+        _LOGGER.warning(f"Sensor {self._name} with data_key '{self._data_key}' has no unit defined!")
         return None
 
     @property
@@ -544,12 +549,14 @@ class UniFiSpeedTestSensorMultiWAN(CoordinatorEntity, SensorEntity):
         return value
 
     @property
-    def unit_of_measurement(self) -> str:
+    def unit_of_measurement(self) -> str | None:
         """Return the unit of measurement following Home Assistant standards."""
         if self._data_key in ["download", "upload"]:
             return "Mbit/s"
         elif self._data_key == "ping":
             return "ms"
+        # Log warning if sensor has unexpected data_key
+        _LOGGER.warning(f"Multi-WAN Sensor {self._name} with data_key '{self._data_key}' has no unit defined!")
         return None
 
     @property

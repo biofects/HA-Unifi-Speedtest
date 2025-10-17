@@ -22,6 +22,7 @@ CONF_ENABLE_MULTI_WAN = "enable_multi_wan"  # New configuration for multi-WAN su
 # Service names
 SERVICE_START_SPEED_TEST = "start_speed_test"
 SERVICE_GET_SPEED_TEST_STATUS = "get_speed_test_status"
+SERVICE_GET_WAN_INTERFACES = "get_wan_interfaces"
 
 # Default values - Conservative settings to prevent 403 errors
 DEFAULT_SCHEDULE_INTERVAL = 90  # 90 minutes (conservative to avoid rate limiting)
