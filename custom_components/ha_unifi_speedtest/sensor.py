@@ -453,17 +453,20 @@ class UniFiSpeedTestSensor(CoordinatorEntity, SensorEntity):
     @property
     def unit_of_measurement(self) -> str | None:
         """Return the unit of measurement following Home Assistant standards."""
+        # CRITICAL: Must return valid unit when device_class is set (HA 2025.x requirement)
         if self._data_key in ["download", "upload"]:
             return "Mbit/s"  # Changed from "Mbps" to "Mbit/s" to match HA standards
         elif self._data_key == "ping":
             return "ms"
-        # Log warning if sensor has unexpected data_key
-        _LOGGER.warning(f"Sensor {self._name} with data_key '{self._data_key}' has no unit defined!")
-        return None
+        # Should never reach here if sensors are created correctly
+        _LOGGER.error(f"Sensor {self._name} with data_key '{self._data_key}' has no unit defined!")
+        # Return a default to prevent HA 2025.x errors
+        return "Mbit/s"
 
     @property
     def device_class(self) -> SensorDeviceClass | None:
         """Return the device class for the sensor."""
+        # Only set device_class when we have a valid unit to avoid HA 2025.x errors
         if self._data_key in ["download", "upload"]:
             return SensorDeviceClass.DATA_RATE
         elif self._data_key == "ping":
@@ -551,17 +554,20 @@ class UniFiSpeedTestSensorMultiWAN(CoordinatorEntity, SensorEntity):
     @property
     def unit_of_measurement(self) -> str | None:
         """Return the unit of measurement following Home Assistant standards."""
+        # CRITICAL: Must return valid unit when device_class is set (HA 2025.x requirement)
         if self._data_key in ["download", "upload"]:
             return "Mbit/s"
         elif self._data_key == "ping":
             return "ms"
-        # Log warning if sensor has unexpected data_key
-        _LOGGER.warning(f"Multi-WAN Sensor {self._name} with data_key '{self._data_key}' has no unit defined!")
-        return None
+        # Should never reach here if sensors are created correctly
+        _LOGGER.error(f"Multi-WAN Sensor {self._name} with data_key '{self._data_key}' has no unit defined!")
+        # Return a default to prevent HA 2025.x errors
+        return "Mbit/s"
 
     @property
     def device_class(self) -> SensorDeviceClass | None:
         """Return the device class for the sensor."""
+        # Only set device_class when we have a valid unit to avoid HA 2025.x errors
         if self._data_key in ["download", "upload"]:
             return SensorDeviceClass.DATA_RATE
         elif self._data_key == "ping":
