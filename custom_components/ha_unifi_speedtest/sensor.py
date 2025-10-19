@@ -434,6 +434,11 @@ class UniFiSpeedTestSensor(CoordinatorEntity, SensorEntity):
         self._name = name
         self._data_key = data_key
         self._state = None
+        
+        # Validate data_key to prevent unit_of_measurement errors
+        if data_key not in ["download", "upload", "ping"]:
+            _LOGGER.error(f"INVALID data_key '{data_key}' for sensor {name}! Must be 'download', 'upload', or 'ping'")
+        
         _LOGGER.info(f"Sensor initialized: {self._name} ({self._data_key})")
 
     @property
@@ -451,16 +456,19 @@ class UniFiSpeedTestSensor(CoordinatorEntity, SensorEntity):
         return value
 
     @property
-    def unit_of_measurement(self) -> str | None:
+    def unit_of_measurement(self) -> str:
         """Return the unit of measurement following Home Assistant standards."""
         # CRITICAL: Must return valid unit when device_class is set (HA 2025.x requirement)
+        # NEVER return None to prevent KeyError in HA 2025.x unit conversion
         if self._data_key in ["download", "upload"]:
             return "Mbit/s"  # Changed from "Mbps" to "Mbit/s" to match HA standards
         elif self._data_key == "ping":
             return "ms"
+        
         # Should never reach here if sensors are created correctly
         _LOGGER.error(f"Sensor {self._name} with data_key '{self._data_key}' has no unit defined!")
-        # Return a default to prevent HA 2025.x errors
+        _LOGGER.error(f"This indicates a bug - sensor was created with invalid data_key")
+        # Return a default to prevent HA 2025.x errors - do NOT return None!
         return "Mbit/s"
 
     @property
@@ -511,6 +519,11 @@ class UniFiSpeedTestSensorMultiWAN(CoordinatorEntity, SensorEntity):
         self._wan_group = wan_group
         self._wan_index = wan_index
         self._state = None
+        
+        # Validate data_key to prevent unit_of_measurement errors
+        if data_key not in ["download", "upload", "ping"]:
+            _LOGGER.error(f"INVALID data_key '{data_key}' for Multi-WAN sensor {name}! Must be 'download', 'upload', or 'ping'")
+        
         _LOGGER.info(f"Multi-WAN Sensor initialized: {self._name} ({self._data_key}) for {interface_name}/{wan_group}")
 
     @property
@@ -552,16 +565,19 @@ class UniFiSpeedTestSensorMultiWAN(CoordinatorEntity, SensorEntity):
         return value
 
     @property
-    def unit_of_measurement(self) -> str | None:
+    def unit_of_measurement(self) -> str:
         """Return the unit of measurement following Home Assistant standards."""
         # CRITICAL: Must return valid unit when device_class is set (HA 2025.x requirement)
+        # NEVER return None to prevent KeyError in HA 2025.x unit conversion
         if self._data_key in ["download", "upload"]:
             return "Mbit/s"
         elif self._data_key == "ping":
             return "ms"
+        
         # Should never reach here if sensors are created correctly
         _LOGGER.error(f"Multi-WAN Sensor {self._name} with data_key '{self._data_key}' has no unit defined!")
-        # Return a default to prevent HA 2025.x errors
+        _LOGGER.error(f"This indicates a bug - sensor was created with invalid data_key")
+        # Return a default to prevent HA 2025.x errors - do NOT return None!
         return "Mbit/s"
 
     @property
