@@ -14,6 +14,7 @@ CONF_PASSWORD = "password"
 CONF_SITE = "site"
 CONF_VERIFY_SSL = "verify_ssl"
 CONF_CONTROLLER_TYPE = "controller_type"
+CONF_HAS_ADMIN = "has_admin_access"  # Whether user has admin privileges
 CONF_ENABLE_SCHEDULING = "enable_scheduling"
 CONF_SCHEDULE_INTERVAL = "schedule_interval"
 CONF_POLLING_INTERVAL = "polling_interval"
@@ -25,6 +26,7 @@ SERVICE_GET_SPEED_TEST_STATUS = "get_speed_test_status"
 SERVICE_GET_WAN_INTERFACES = "get_wan_interfaces"
 
 # Default values - Conservative settings to prevent 403 errors
+DEFAULT_HAS_ADMIN = True  # Assume admin access by default for backward compatibility
 DEFAULT_SCHEDULE_INTERVAL = 90  # 90 minutes (conservative to avoid rate limiting)
 DEFAULT_ENABLE_SCHEDULING = True
 DEFAULT_POLLING_INTERVAL = 30  # 30 minutes (auto-calculated when not specified)

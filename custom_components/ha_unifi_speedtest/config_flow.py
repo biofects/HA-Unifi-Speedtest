@@ -12,10 +12,12 @@ from .const import (
     CONF_SITE, 
     CONF_VERIFY_SSL,
     CONF_CONTROLLER_TYPE,
+    CONF_HAS_ADMIN,
     CONF_ENABLE_SCHEDULING,
     CONF_SCHEDULE_INTERVAL,
     CONF_POLLING_INTERVAL,
     CONF_ENABLE_MULTI_WAN,
+    DEFAULT_HAS_ADMIN,
     DEFAULT_SCHEDULE_INTERVAL,
     DEFAULT_ENABLE_SCHEDULING,
     DEFAULT_POLLING_INTERVAL,
@@ -111,6 +113,7 @@ class UniFiSpeedTestConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_SITE, default='default', description="UniFi Site Name"): str,
                 vol.Optional(CONF_VERIFY_SSL, default=False, description="Verify SSL Certificate"): bool,
                 vol.Optional(CONF_CONTROLLER_TYPE, default='udm', description="Controller Type (UDM Pro/SE/Cloud Key = udm, Self-hosted = controller)"): vol.In({'udm': 'UDM Pro/SE/Cloud Key Gen2+', 'controller': 'Self-hosted Controller'}),
+                vol.Optional(CONF_HAS_ADMIN, default=DEFAULT_HAS_ADMIN, description="Account has Administrator privileges (required to trigger speed tests)"): bool,
                 vol.Optional(CONF_ENABLE_SCHEDULING, default=DEFAULT_ENABLE_SCHEDULING, description="Enable Automatic Speed Tests"): bool,
                 vol.Optional(
                     CONF_SCHEDULE_INTERVAL, 
@@ -182,6 +185,8 @@ class UniFiSpeedTestOptionsFlow(config_entries.OptionsFlow):
                                                           self.config_entry.data.get(CONF_VERIFY_SSL, False))
         current_controller_type = self.config_entry.options.get(CONF_CONTROLLER_TYPE,
                                                               self.config_entry.data.get(CONF_CONTROLLER_TYPE, 'udm'))
+        current_has_admin = self.config_entry.options.get(CONF_HAS_ADMIN,
+                                                         self.config_entry.data.get(CONF_HAS_ADMIN, DEFAULT_HAS_ADMIN))
         current_enable_scheduling = self.config_entry.options.get(CONF_ENABLE_SCHEDULING,
                                                                  self.config_entry.data.get(CONF_ENABLE_SCHEDULING, DEFAULT_ENABLE_SCHEDULING))
         current_schedule_interval = self.config_entry.options.get(CONF_SCHEDULE_INTERVAL,
@@ -207,6 +212,7 @@ class UniFiSpeedTestOptionsFlow(config_entries.OptionsFlow):
                 vol.Optional(CONF_SITE, default=current_site, description="UniFi Site Name"): str,
                 vol.Optional(CONF_VERIFY_SSL, default=current_verify_ssl, description="Verify SSL Certificate"): bool,
                 vol.Optional(CONF_CONTROLLER_TYPE, default=current_controller_type, description="Controller Type (UDM Pro/SE/Cloud Key = udm, Self-hosted = controller)"): vol.In({'udm': 'UDM Pro/SE/Cloud Key Gen2+', 'controller': 'Self-hosted Controller'}),
+                vol.Optional(CONF_HAS_ADMIN, default=current_has_admin, description="Account has Administrator privileges (required to trigger speed tests)"): bool,
                 vol.Optional(CONF_ENABLE_SCHEDULING, default=current_enable_scheduling, description="Enable Automatic Speed Tests"): bool,
                 vol.Optional(
                     CONF_SCHEDULE_INTERVAL, 

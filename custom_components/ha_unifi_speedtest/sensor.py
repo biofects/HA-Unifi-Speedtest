@@ -12,7 +12,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, SensorStateClass
 
-from .const import DOMAIN, INTEGRATION_NAME, CONF_SCHEDULE_INTERVAL, CONF_ENABLE_SCHEDULING, CONF_POLLING_INTERVAL, CONF_ENABLE_MULTI_WAN
+from .const import DOMAIN, INTEGRATION_NAME, CONF_SCHEDULE_INTERVAL, CONF_ENABLE_SCHEDULING, CONF_POLLING_INTERVAL, CONF_ENABLE_MULTI_WAN, CONF_HAS_ADMIN
 from .api import UniFiAPI
 
 _LOGGER = logging.getLogger(__name__)
@@ -79,8 +79,16 @@ async def async_setup_entry(
                 return coordinator.data if coordinator.data else {'download': None, 'upload': None, 'ping': None}
 
     # Get scheduling configuration from config entry options or data
+    has_admin = config_entry.options.get(CONF_HAS_ADMIN,
+                                        config_entry.data.get(CONF_HAS_ADMIN, True))
     enable_scheduling = config_entry.options.get(CONF_ENABLE_SCHEDULING, 
                                                config_entry.data.get(CONF_ENABLE_SCHEDULING, True))
+    
+    # Disable scheduling if user doesn't have admin access
+    if not has_admin and enable_scheduling:
+        _LOGGER.warning("Automatic speed tests disabled: Administrator privileges required to trigger speed tests")
+        enable_scheduling = False
+    
     schedule_interval = config_entry.options.get(CONF_SCHEDULE_INTERVAL, 
                                                config_entry.data.get(CONF_SCHEDULE_INTERVAL, 90))
 
