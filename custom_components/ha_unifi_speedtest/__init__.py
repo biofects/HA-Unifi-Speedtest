@@ -181,14 +181,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.info(f"Speed test status requested for config entry: {config_entry_id}")
             try:
                 status = await hass.async_add_executor_job(api_instance.get_speed_test_status)
-                # Determine a short state string for the sensor
+                # Always set a short string as the state
                 if isinstance(status, dict):
                     if 'error' in status and status['error']:
                         state = "error"
                     elif 'wan_interfaces' in status and status.get('total_interfaces', 0) > 0:
                         state = "ok"
                     elif all(k in status for k in ("download", "upload", "ping")):
-                        # If all present, use 'ok', else 'unavailable'
                         if all(status.get(k) is not None for k in ("download", "upload", "ping")):
                             state = "ok"
                         else:
@@ -198,6 +197,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 else:
                     state = str(status)[:32]  # fallback, truncate if needed
 
+                # Only put the full status in attributes, never in state
                 hass.states.async_set(
                     "sensor.unifi_speed_test_status",
                     state,
