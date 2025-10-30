@@ -4,7 +4,7 @@ from homeassistant.helpers import config_validation as cv
 import voluptuous as vol
 import logging
 
-from .const import DOMAIN, INTEGRATION_NAME, SERVICE_START_SPEED_TEST, SERVICE_GET_SPEED_TEST_STATUS, SERVICE_GET_WAN_INTERFACES, CONF_SCHEDULE_INTERVAL, CONF_ENABLE_SCHEDULING, CONF_ENABLE_MULTI_WAN
+from .const import DOMAIN, INTEGRATION_NAME, SERVICE_START_SPEED_TEST, SERVICE_GET_SPEED_TEST_STATUS, SERVICE_GET_WAN_INTERFACES, CONF_SCHEDULE_INTERVAL, CONF_ENABLE_SCHEDULING, CONF_ENABLE_MULTI_WAN, CONF_HAS_ADMIN
 from .api import UniFiAPI
 
 _LOGGER = logging.getLogger(__name__)
@@ -88,6 +88,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 
             api_instance = hass.data[DOMAIN][config_entry_id]
             
+            # Check if user has admin access before allowing speed test trigger
+            config_entry = hass.config_entries.async_get_entry(config_entry_id)
+            if config_entry:
+                has_admin = config_entry.options.get(CONF_HAS_ADMIN, config_entry.data.get(CONF_HAS_ADMIN, True))
+                if not has_admin:
+                    _LOGGER.warning("Speed test service called but user does not have admin access")
+                    return {
+                        "success": False,
+                        "error": "Administrator privileges required to trigger speed tests. Enable 'Has Administrator Access' in integration settings."
+                    }
+            
             # Debug logging to identify the issue
             _LOGGER.debug(f"Retrieved API instance type: {type(api_instance)}")
             _LOGGER.debug(f"API instance: {api_instance}")
@@ -170,7 +181,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.info(f"Speed test status requested for config entry: {config_entry_id}")
             try:
                 status = await hass.async_add_executor_job(api_instance.get_speed_test_status)
-                hass.states.async_set("sensor.unifi_speed_test_status", status)
+                # Determine a short state string for the sensor
+                if isinstance(status, dict):
+                    if 'error' in status and status['error']:
+                        state = "error"
+                    elif 'wan_interfaces' in status and status.get('total_interfaces', 0) > 0:
+                        state = "ok"
+                    elif all(k in status for k in ("download", "upload", "ping")):
+                        # If all present, use 'ok', else 'unavailable'
+                        if all(status.get(k) is not None for k in ("download", "upload", "ping")):
+                            state = "ok"
+                        else:
+                            state = "unavailable"
+                    else:
+                        state = "unknown"
+                else:
+                    state = str(status)[:32]  # fallback, truncate if needed
+
+                hass.states.async_set(
+                    "sensor.unifi_speed_test_status",
+                    state,
+                    attributes=status if isinstance(status, dict) else {}
+                )
                 _LOGGER.info(f"Speed test status retrieved: {status}")
                 return {
                     "success": True,
