@@ -1,5 +1,6 @@
+"""Config flow for HA UniFi Speedtest integration."""
 from homeassistant import config_entries
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import callback
 import voluptuous as vol
 import logging
 
@@ -8,7 +9,8 @@ from .const import (
     INTEGRATION_NAME,
     CONF_URL, 
     CONF_USERNAME, 
-    CONF_PASSWORD, 
+    CONF_PASSWORD,
+    CONF_API_KEY,
     CONF_SITE, 
     CONF_VERIFY_SSL,
     CONF_CONTROLLER_TYPE,
@@ -16,27 +18,35 @@ from .const import (
     CONF_SCHEDULE_INTERVAL,
     CONF_POLLING_INTERVAL,
     CONF_ENABLE_MULTI_WAN,
+    CONF_SHOW_INACTIVE_WAN,
     DEFAULT_SCHEDULE_INTERVAL,
     DEFAULT_ENABLE_SCHEDULING,
-    DEFAULT_POLLING_INTERVAL,
-    DEFAULT_ENABLE_MULTI_WAN
+    DEFAULT_ENABLE_MULTI_WAN,
+    DEFAULT_SHOW_INACTIVE_WAN
 )
-from .api import UniFiAPI
+from .api_factory import create_unifi_api
 
 _LOGGER = logging.getLogger(__name__)
+
 
 def calculate_polling_interval(schedule_interval: int) -> int:
     """Calculate optimal polling interval based on speed test schedule."""
     if schedule_interval <= 30:
-        return max(10, schedule_interval // 3)  # Very frequent speed tests
+        return max(10, schedule_interval // 3)
     elif schedule_interval <= 60:
-        return max(15, schedule_interval // 2)  # Moderate frequency
+        return max(15, schedule_interval // 2)
     else:
-        return max(20, schedule_interval // 3)  # Conservative frequency
+        return max(20, schedule_interval // 3)
+
 
 class UniFiSpeedTestConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for HA Unifi Speedtest."""
+    
     VERSION = 1
+    
+    def __init__(self):
+        """Initialize config flow."""
+        self.controller_type = None
     
     @staticmethod
     @callback
@@ -45,198 +55,201 @@ class UniFiSpeedTestConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return UniFiSpeedTestOptionsFlow(config_entry)
     
     async def async_step_user(self, user_input=None):
-        """Handle the initial step."""
-        errors = {}
-        _LOGGER.info("Starting config flow: async_step_user")
+        """Handle the initial step - select controller type."""
+        _LOGGER.info("Config flow step 1: Controller type selection")
         
         if user_input is not None:
-            _LOGGER.info(f"User input received: {user_input}")
-            try:
-                schedule_interval = user_input.get(CONF_SCHEDULE_INTERVAL, DEFAULT_SCHEDULE_INTERVAL)
-                enable_scheduling = user_input.get(CONF_ENABLE_SCHEDULING, DEFAULT_ENABLE_SCHEDULING)
-                
-                # Auto-calculate polling interval
-                polling_interval = calculate_polling_interval(schedule_interval) if enable_scheduling else 30
-                
-                # Attempt to login and validate credentials
-                api = UniFiAPI(
-                    user_input[CONF_URL], 
-                    user_input[CONF_USERNAME], 
-                    user_input[CONF_PASSWORD],
-                    site=user_input.get(CONF_SITE, 'default'),
-                    verify_ssl=user_input.get(CONF_VERIFY_SSL, False),
-                    controller_type=user_input.get(CONF_CONTROLLER_TYPE, 'udm')
-                )
-                _LOGGER.info("Attempting API login...")
-                await self.hass.async_add_executor_job(api.login)
-                _LOGGER.info("API login successful.")
-                
-                # Get controller info for the title
-                controller_info = api.get_controller_info()
-                controller_type_display = controller_info['type'].upper() if controller_info['type'] else 'UniFi'
-                
-                return self.async_create_entry(
-                    title=f"{INTEGRATION_NAME} ({controller_type_display})", 
-                    data={
-                        CONF_URL: user_input[CONF_URL],
-                        CONF_USERNAME: user_input[CONF_USERNAME],
-                        CONF_PASSWORD: user_input[CONF_PASSWORD],
-                        CONF_SITE: user_input.get(CONF_SITE, 'default'),
-                        CONF_VERIFY_SSL: user_input.get(CONF_VERIFY_SSL, False),
-                        CONF_CONTROLLER_TYPE: user_input.get(CONF_CONTROLLER_TYPE, 'udm'),
-                        CONF_ENABLE_SCHEDULING: enable_scheduling,
-                        CONF_SCHEDULE_INTERVAL: schedule_interval,
-                        CONF_POLLING_INTERVAL: polling_interval  # Auto-calculated
-                    }
-                )
-            except Exception as e:
-                _LOGGER.error(f"API login failed: {e}")
-                if "403" in str(e) or "forbidden" in str(e).lower():
-                    errors["base"] = "access_denied"
-                elif "timeout" in str(e).lower():
-                    errors["base"] = "timeout"
-                elif "connection" in str(e).lower():
-                    errors["base"] = "cannot_connect"
-                else:
-                    errors["base"] = "unknown_error"
-        else:
-            _LOGGER.info("No user input yet, showing form.")
+            self.controller_type = user_input[CONF_CONTROLLER_TYPE]
+            _LOGGER.info(f"Controller type selected: {self.controller_type}")
+            return await self.async_step_credentials()
         
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({
-                vol.Required(CONF_URL, description="UniFi Controller URL (e.g., https://your-udm.local)"): str,
-                vol.Required(CONF_USERNAME, description="UniFi Controller Username"): str,
-                vol.Required(CONF_PASSWORD, description="UniFi Controller Password"): str,
-                vol.Optional(CONF_SITE, default='default', description="UniFi Site Name"): str,
-                vol.Optional(CONF_VERIFY_SSL, default=False, description="Verify SSL Certificate"): bool,
-                vol.Optional(CONF_CONTROLLER_TYPE, default='udm', description="Controller Type (UDM Pro/SE/Cloud Key = udm, Self-hosted = controller)"): vol.In({'udm': 'UDM Pro/SE/Cloud Key Gen2+', 'controller': 'Self-hosted Controller'}),
-                vol.Optional(CONF_ENABLE_SCHEDULING, default=DEFAULT_ENABLE_SCHEDULING, description="Enable Automatic Speed Tests"): bool,
-                vol.Optional(
-                    CONF_SCHEDULE_INTERVAL, 
-                    default=DEFAULT_SCHEDULE_INTERVAL,
-                    description="Speed Test Interval (minutes)"
-                ): vol.All(int, vol.Range(min=15, max=1440)),  # 15 minutes to 24 hours
-                vol.Optional(CONF_ENABLE_MULTI_WAN, default=DEFAULT_ENABLE_MULTI_WAN, description="Enable Multi-WAN Detection"): bool,
+                vol.Required(CONF_CONTROLLER_TYPE, default='udm'): vol.In({
+                    'udm': 'UDM Pro/SE/Cloud Key Gen2+',
+                    'controller': 'Self-hosted Network Application'
+                }),
             }),
-            errors=errors,
             description_placeholders={
-                "controller_info": "Choose 'udm' for UDM Pro/Cloud Key Gen2, or 'controller' for traditional UniFi Controller.",
-                "schedule_info": "Automatic speed tests run at regular intervals. Data polling is automatically optimized based on your speed test frequency to avoid rate limiting.",
-                "rate_limit_warning": "⚠️ Setting intervals too low may cause 403 rate limit errors. Recommended: Speed tests every 60+ minutes minimum.",
-                "polling_info": "📊 Data polling interval is automatically calculated to be optimal for your speed test schedule and prevent rate limiting."
+                "info": "Select your UniFi controller type"
             }
         )
+
+    async def async_step_credentials(self, user_input=None):
+        """Handle credentials based on controller type."""
+        errors = {}
+        _LOGGER.info(f"Config flow step 2: Credentials for {self.controller_type}")
+        
+        if user_input is not None:
+            _LOGGER.info("Credentials received, validating...")
+            try:
+                api_args = {
+                    "url": user_input[CONF_URL],
+                    "site": user_input.get(CONF_SITE, 'default'),
+                    "verify_ssl": user_input.get(CONF_VERIFY_SSL, False),
+                    "controller_type": self.controller_type,
+                    "enable_multi_wan": user_input.get(CONF_ENABLE_MULTI_WAN, DEFAULT_ENABLE_MULTI_WAN),
+                }
+                
+                if self.controller_type == 'udm':
+                    api_args["api_key"] = user_input[CONF_API_KEY]
+                else:
+                    api_args["username"] = user_input[CONF_USERNAME]
+                    api_args["password"] = user_input[CONF_PASSWORD]
+                
+                api = await self.hass.async_add_executor_job(
+                    lambda: create_unifi_api(**api_args)
+                )
+                
+                if self.controller_type == 'controller':
+                    await self.hass.async_add_executor_job(api.login)
+                
+                connection_ok = await self.hass.async_add_executor_job(api.test_connection)
+                if not connection_ok:
+                    raise Exception("Connection test failed")
+                
+                _LOGGER.info("Connection test successful")
+                
+                controller_info = await self.hass.async_add_executor_job(api.get_controller_info)
+                controller_type_display = controller_info.get('type', 'UniFi').upper()
+                
+                schedule_interval = user_input.get(CONF_SCHEDULE_INTERVAL, DEFAULT_SCHEDULE_INTERVAL)
+                enable_scheduling = user_input.get(CONF_ENABLE_SCHEDULING, DEFAULT_ENABLE_SCHEDULING)
+                polling_interval = calculate_polling_interval(schedule_interval) if enable_scheduling else 30
+                
+                entry_data = {
+                    CONF_URL: user_input[CONF_URL],
+                    CONF_SITE: user_input.get(CONF_SITE, 'default'),
+                    CONF_VERIFY_SSL: user_input.get(CONF_VERIFY_SSL, False),
+                    CONF_CONTROLLER_TYPE: self.controller_type,
+                    CONF_ENABLE_SCHEDULING: enable_scheduling,
+                    CONF_SCHEDULE_INTERVAL: schedule_interval,
+                    CONF_POLLING_INTERVAL: polling_interval,
+                    CONF_ENABLE_MULTI_WAN: user_input.get(CONF_ENABLE_MULTI_WAN, DEFAULT_ENABLE_MULTI_WAN),
+                    CONF_SHOW_INACTIVE_WAN: user_input.get(CONF_SHOW_INACTIVE_WAN, DEFAULT_SHOW_INACTIVE_WAN),
+                }
+                
+                if self.controller_type == 'udm':
+                    entry_data[CONF_API_KEY] = user_input[CONF_API_KEY]
+                else:
+                    entry_data[CONF_USERNAME] = user_input[CONF_USERNAME]
+                    entry_data[CONF_PASSWORD] = user_input[CONF_PASSWORD]
+                
+                return self.async_create_entry(
+                    title=f"{INTEGRATION_NAME} ({controller_type_display})", 
+                    data=entry_data
+                )
+                
+            except Exception as e:
+                _LOGGER.error(f"Configuration validation failed: {e}")
+                if "403" in str(e) or "forbidden" in str(e).lower():
+                    errors["base"] = "access_denied"
+                elif "401" in str(e) or "unauthorized" in str(e).lower():
+                    errors["base"] = "invalid_auth"
+                elif "timeout" in str(e).lower():
+                    errors["base"] = "timeout"
+                elif "connect" in str(e).lower():
+                    errors["base"] = "cannot_connect"
+                else:
+                    errors["base"] = "unknown_error"
+        
+        schema_dict = {
+            vol.Required(CONF_URL): str,
+        }
+        
+        if self.controller_type == 'udm':
+            schema_dict[vol.Required(CONF_API_KEY)] = str
+        else:
+            schema_dict[vol.Required(CONF_USERNAME)] = str
+            schema_dict[vol.Required(CONF_PASSWORD)] = str
+        
+        schema_dict.update({
+            vol.Optional(CONF_SITE, default='default'): str,
+            vol.Optional(CONF_VERIFY_SSL, default=False): bool,
+            vol.Optional(CONF_ENABLE_SCHEDULING, default=DEFAULT_ENABLE_SCHEDULING): bool,
+            vol.Optional(CONF_SCHEDULE_INTERVAL, default=DEFAULT_SCHEDULE_INTERVAL): vol.All(int, vol.Range(min=15, max=1440)),
+        })
+        
+        if self.controller_type == 'udm':
+            schema_dict[vol.Optional(CONF_ENABLE_MULTI_WAN, default=DEFAULT_ENABLE_MULTI_WAN)] = bool
+            schema_dict[vol.Optional(CONF_SHOW_INACTIVE_WAN, default=DEFAULT_SHOW_INACTIVE_WAN)] = bool
+        
+        return self.async_show_form(
+            step_id="credentials",
+            data_schema=vol.Schema(schema_dict),
+            errors=errors,
+        )
+
 
 class UniFiSpeedTestOptionsFlow(config_entries.OptionsFlow):
     """Options flow for HA Unifi Speedtest."""
 
-    def __init__(self, config_entry):
-        """Initialize options flow."""
-        # Modern approach: Don't manually set self.config_entry
-        # The parent class provides it automatically through framework magic
-        _LOGGER.info("Options flow initialized.")
-
     async def async_step_init(self, user_input=None):
         """Manage the options."""
-        _LOGGER.info("Options flow step: init")
         errors = {}
         
         if user_input is not None:
-            _LOGGER.info(f"Options input received: {user_input}")
-            
             schedule_interval = user_input.get(CONF_SCHEDULE_INTERVAL, DEFAULT_SCHEDULE_INTERVAL)
             enable_scheduling = user_input.get(CONF_ENABLE_SCHEDULING, DEFAULT_ENABLE_SCHEDULING)
-            
-            # Auto-calculate polling interval
             polling_interval = calculate_polling_interval(schedule_interval) if enable_scheduling else 30
-            
-            # Add the calculated polling interval to the options
             user_input[CONF_POLLING_INTERVAL] = polling_interval
-            
-            # Get current values to check if reload is needed
-            current_enable = self.config_entry.options.get(CONF_ENABLE_SCHEDULING, 
-                                                         self.config_entry.data.get(CONF_ENABLE_SCHEDULING, DEFAULT_ENABLE_SCHEDULING))
-            current_interval = self.config_entry.options.get(CONF_SCHEDULE_INTERVAL, 
-                                                           self.config_entry.data.get(CONF_SCHEDULE_INTERVAL, DEFAULT_SCHEDULE_INTERVAL))
-            current_polling = self.config_entry.options.get(CONF_POLLING_INTERVAL, 
-                                                          self.config_entry.data.get(CONF_POLLING_INTERVAL, DEFAULT_POLLING_INTERVAL))
             
             result = self.async_create_entry(title="", data=user_input)
             
-            # If scheduling settings changed, we need to reload the entry
-            if (current_enable != enable_scheduling or 
-                current_interval != schedule_interval or 
-                current_polling != polling_interval):
-                _LOGGER.info("Scheduling settings changed, reloading integration...")
+            current_enable = self.config_entry.options.get(
+                CONF_ENABLE_SCHEDULING, 
+                self.config_entry.data.get(CONF_ENABLE_SCHEDULING, DEFAULT_ENABLE_SCHEDULING)
+            )
+            current_interval = self.config_entry.options.get(
+                CONF_SCHEDULE_INTERVAL,
+                self.config_entry.data.get(CONF_SCHEDULE_INTERVAL, DEFAULT_SCHEDULE_INTERVAL)
+            )
+            
+            if current_enable != enable_scheduling or current_interval != schedule_interval:
                 self.hass.async_create_task(
                     self.hass.config_entries.async_reload(self.config_entry.entry_id)
                 )
             
             return result
         
-        # Get current values from config entry data or options
-        current_site = self.config_entry.options.get(CONF_SITE, 
-                                                    self.config_entry.data.get(CONF_SITE, 'default'))
-        current_verify_ssl = self.config_entry.options.get(CONF_VERIFY_SSL, 
-                                                          self.config_entry.data.get(CONF_VERIFY_SSL, False))
-        current_controller_type = self.config_entry.options.get(CONF_CONTROLLER_TYPE,
-                                                              self.config_entry.data.get(CONF_CONTROLLER_TYPE, 'udm'))
-        current_enable_scheduling = self.config_entry.options.get(CONF_ENABLE_SCHEDULING,
-                                                                 self.config_entry.data.get(CONF_ENABLE_SCHEDULING, DEFAULT_ENABLE_SCHEDULING))
-        current_schedule_interval = self.config_entry.options.get(CONF_SCHEDULE_INTERVAL,
-                                                                 self.config_entry.data.get(CONF_SCHEDULE_INTERVAL, DEFAULT_SCHEDULE_INTERVAL))
-        current_polling_interval = self.config_entry.options.get(CONF_POLLING_INTERVAL,
-                                                                self.config_entry.data.get(CONF_POLLING_INTERVAL, DEFAULT_POLLING_INTERVAL))
-        current_enable_multi_wan = self.config_entry.options.get(CONF_ENABLE_MULTI_WAN,
-                                                                self.config_entry.data.get(CONF_ENABLE_MULTI_WAN, DEFAULT_ENABLE_MULTI_WAN))
-
-        _LOGGER.info("No options input yet, showing form.")
+        current_site = self.config_entry.options.get(
+            CONF_SITE, self.config_entry.data.get(CONF_SITE, 'default')
+        )
+        current_verify_ssl = self.config_entry.options.get(
+            CONF_VERIFY_SSL, self.config_entry.data.get(CONF_VERIFY_SSL, False)
+        )
+        current_controller_type = self.config_entry.data.get(CONF_CONTROLLER_TYPE, 'udm')
+        current_enable_scheduling = self.config_entry.options.get(
+            CONF_ENABLE_SCHEDULING,
+            self.config_entry.data.get(CONF_ENABLE_SCHEDULING, DEFAULT_ENABLE_SCHEDULING)
+        )
+        current_schedule_interval = self.config_entry.options.get(
+            CONF_SCHEDULE_INTERVAL,
+            self.config_entry.data.get(CONF_SCHEDULE_INTERVAL, DEFAULT_SCHEDULE_INTERVAL)
+        )
+        current_enable_multi_wan = self.config_entry.options.get(
+            CONF_ENABLE_MULTI_WAN,
+            self.config_entry.data.get(CONF_ENABLE_MULTI_WAN, DEFAULT_ENABLE_MULTI_WAN)
+        )
+        current_show_inactive_wan = self.config_entry.options.get(
+            CONF_SHOW_INACTIVE_WAN,
+            self.config_entry.data.get(CONF_SHOW_INACTIVE_WAN, DEFAULT_SHOW_INACTIVE_WAN)
+        )
         
-        # Calculate some helpful display values
-        if current_enable_scheduling:
-            tests_per_day = 1440 // current_schedule_interval  # 1440 minutes in a day
-            calculated_polling = calculate_polling_interval(current_schedule_interval)
-            status_msg = f"Currently: Speed tests every {current_schedule_interval} min (~{tests_per_day} tests/day), polling every {current_polling_interval} min (recommended: {calculated_polling} min)"
-        else:
-            status_msg = f"Currently: Scheduling disabled, polling every {current_polling_interval} min"
+        schema_dict = {
+            vol.Optional(CONF_SITE, default=current_site): str,
+            vol.Optional(CONF_VERIFY_SSL, default=current_verify_ssl): bool,
+            vol.Optional(CONF_ENABLE_SCHEDULING, default=current_enable_scheduling): bool,
+            vol.Optional(CONF_SCHEDULE_INTERVAL, default=current_schedule_interval): vol.All(int, vol.Range(min=15, max=1440)),
+        }
+        
+        if current_controller_type == 'udm':
+            schema_dict[vol.Optional(CONF_ENABLE_MULTI_WAN, default=current_enable_multi_wan)] = bool
+            schema_dict[vol.Optional(CONF_SHOW_INACTIVE_WAN, default=current_show_inactive_wan)] = bool
         
         return self.async_show_form(
             step_id="init",
-            data_schema=vol.Schema({
-                vol.Optional(CONF_SITE, default=current_site, description="UniFi Site Name"): str,
-                vol.Optional(CONF_VERIFY_SSL, default=current_verify_ssl, description="Verify SSL Certificate"): bool,
-                vol.Optional(CONF_CONTROLLER_TYPE, default=current_controller_type, description="Controller Type (UDM Pro/SE/Cloud Key = udm, Self-hosted = controller)"): vol.In({'udm': 'UDM Pro/SE/Cloud Key Gen2+', 'controller': 'Self-hosted Controller'}),
-                vol.Optional(CONF_ENABLE_SCHEDULING, default=current_enable_scheduling, description="Enable Automatic Speed Tests"): bool,
-                vol.Optional(
-                    CONF_SCHEDULE_INTERVAL, 
-                    default=current_schedule_interval,
-                    description=f"Speed Test Interval (minutes) - Currently: {current_schedule_interval}"
-                ): vol.All(int, vol.Range(min=15, max=1440)),
-                vol.Optional(CONF_ENABLE_MULTI_WAN, default=current_enable_multi_wan, description="Enable Multi-WAN Detection"): bool,
-            }),
+            data_schema=vol.Schema(schema_dict),
             errors=errors,
-            description_placeholders={
-                "current_status": status_msg,
-                "auto_polling_info": (
-                    "🔄 Polling Interval is Automatically Optimized:\n"
-                    "• Based on your speed test frequency\n"
-                    "• Prevents rate limiting and API conflicts\n"
-                    "• Ensures reliable data collection"
-                ),
-                "interval_guidance": (
-                    "📋 Interval Recommendations:\n"
-                    "• Conservative: 120+ minutes (2+ hours)\n"
-                    "• Balanced: 60-90 minutes (1-1.5 hours)\n"
-                    "• Frequent: 30-45 minutes (may cause rate limiting)\n"
-                    "• Minimum: 15 minutes (only for testing/debugging)"
-                ),
-                "rate_limit_info": (
-                    "⚠️ Rate Limiting Protection:\n"
-                    "The integration automatically handles rate limiting and backs off when needed. "
-                    "If you experience 403 errors, increase the speed test interval. "
-                    "Data polling is optimized automatically to prevent conflicts."
-                ),
-                "reload_warning": "⚡ Settings changes require integration reload which will happen automatically."
-            }
         )
