@@ -185,6 +185,12 @@ class UniFiSpeedTestConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class UniFiSpeedTestOptionsFlow(config_entries.OptionsFlow):
     """Options flow for HA Unifi Speedtest."""
 
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        """Initialize options flow."""
+        # Don't set self.config_entry - parent class provides it automatically
+        # This avoids deprecated warning while accepting the required parameter
+        super().__init__()
+
     async def async_step_init(self, user_input=None):
         """Manage the options."""
         errors = {}
