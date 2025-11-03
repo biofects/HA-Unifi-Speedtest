@@ -33,7 +33,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         try:
             wan_status_map = await hass.async_add_executor_job(api.get_wan_status_map)
         except Exception as e:
-            _LOGGER.warning(f"Could not get WAN status map: {e}")
+            _LOGGER.debug(f"Could not get WAN status map: {e}")
             wan_status_map = {}
 
         def _is_active(iface: str) -> bool:

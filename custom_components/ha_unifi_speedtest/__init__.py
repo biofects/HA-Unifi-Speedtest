@@ -23,7 +23,7 @@ GET_WAN_INTERFACES_SCHEMA = vol.Schema({
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up the HA Unifi Speedtest integration from a config entry."""
-    _LOGGER.warning(f"[INIT] Starting async_setup_entry for HA Unifi Speedtest integration: {entry.entry_id}")
+    _LOGGER.debug(f"Starting async_setup_entry for HA Unifi Speedtest integration: {entry.entry_id}")
     _LOGGER.info(f"Starting async_setup_entry for HA Unifi Speedtest integration: {entry.entry_id}")
     
     # Initialize data storage
@@ -324,6 +324,63 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     _LOGGER.info(f"Unloading config entry for HA Unifi Speedtest integration: {entry.entry_id}")
+    
+    # Clean up entities and devices for inactive WANs if show_inactive_wans is False
+    try:
+        from homeassistant.helpers import entity_registry as er, device_registry as dr
+        entity_registry = er.async_get(hass)
+        device_registry = dr.async_get(hass)
+        show_inactive_wans = entry.options.get("show_inactive_wans", False)
+        
+        _LOGGER.debug(f"Unload: show_inactive_wans = {show_inactive_wans}")
+        
+        if not show_inactive_wans:
+            # Get coordinator to check WAN status
+            coord_key = f"{entry.entry_id}_coordinator"
+            if coord_key in hass.data.get(DOMAIN, {}):
+                coordinator = hass.data[DOMAIN][coord_key]
+                if coordinator and coordinator.data:
+                    wan_interfaces = coordinator.data.get("wan_interfaces", [])
+                    
+                    # Build set of active WAN interfaces (those with speedtest data)
+                    active_wans = set()
+                    for wan in wan_interfaces:
+                        interface_name = wan.get('interface_name') or wan.get('interface')
+                        download = wan.get('download', 0)
+                        upload = wan.get('upload', 0)
+                        if interface_name and ((download is not None and download > 0) or (upload is not None and upload > 0)):
+                            active_wans.add(interface_name)
+                    
+                    _LOGGER.debug(f"Active WANs: {active_wans}")
+                    
+                    # Get all entities for this integration
+                    entities = er.async_entries_for_config_entry(entity_registry, entry.entry_id)
+                    devices_to_check = set()
+                    
+                    for entity in entities:
+                        # Extract WAN interface from unique_id (format: ha_unifi_speedtest_download_eth9_WAN)
+                        # Look for eth followed by a number
+                        wan_interface = None
+                        parts = entity.unique_id.split("_")
+                        for part in parts:
+                            if part.startswith("eth") and any(c.isdigit() for c in part):
+                                wan_interface = part
+                                break
+                        
+                        if wan_interface and wan_interface not in active_wans:
+                            _LOGGER.info(f"Removing inactive WAN entity: {entity.entity_id} (interface: {wan_interface})")
+                            if entity.device_id:
+                                devices_to_check.add(entity.device_id)
+                            entity_registry.async_remove(entity.entity_id)
+                    
+                    # Clean up devices that no longer have any entities
+                    for device_id in devices_to_check:
+                        device_entities = er.async_entries_for_device(entity_registry, device_id, include_disabled_entities=True)
+                        if not device_entities:
+                            _LOGGER.info(f"Removing device with no entities: {device_id}")
+                            device_registry.async_remove_device(device_id)
+    except Exception as e:
+        _LOGGER.error(f"Error cleaning up inactive WAN entities: {e}")
     
     # Cancel any scheduled listeners
     scheduled_listener_key = f"{entry.entry_id}_scheduled_listener"

@@ -48,9 +48,14 @@ class UniFiAPIBase:
         params: Dict[str, Any] | None = None,
         timeout=(10, 30)
     ) -> Response:
-        """Make an HTTP request with error handling."""
+        """Make an HTTP request with error handling.
+        
+        Note: This is a synchronous method designed to be called via
+        hass.async_add_executor_job() to avoid blocking the event loop.
+        """
         url = f"{self.url}{path}"
         try:
+            # This blocking call is intentional - called via executor job
             resp = method(url, json=json, params=params, verify=self.verify_ssl, timeout=timeout)
             resp.raise_for_status()
             return resp

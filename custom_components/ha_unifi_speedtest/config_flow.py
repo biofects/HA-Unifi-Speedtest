@@ -185,10 +185,6 @@ class UniFiSpeedTestConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class UniFiSpeedTestOptionsFlow(config_entries.OptionsFlow):
     """Options flow for HA Unifi Speedtest."""
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        """Initialize options flow."""
-        self.config_entry = config_entry
-
     async def async_step_init(self, user_input=None):
         """Manage the options."""
         errors = {}
@@ -199,8 +195,7 @@ class UniFiSpeedTestOptionsFlow(config_entries.OptionsFlow):
             polling_interval = calculate_polling_interval(schedule_interval) if enable_scheduling else 30
             user_input[CONF_POLLING_INTERVAL] = polling_interval
             
-            result = self.async_create_entry(title="", data=user_input)
-            
+            # Check if we need to reload BEFORE creating entry
             current_enable = self.config_entry.options.get(
                 CONF_ENABLE_SCHEDULING, 
                 self.config_entry.data.get(CONF_ENABLE_SCHEDULING, DEFAULT_ENABLE_SCHEDULING)
@@ -209,11 +204,26 @@ class UniFiSpeedTestOptionsFlow(config_entries.OptionsFlow):
                 CONF_SCHEDULE_INTERVAL,
                 self.config_entry.data.get(CONF_SCHEDULE_INTERVAL, DEFAULT_SCHEDULE_INTERVAL)
             )
+            current_show_inactive = self.config_entry.options.get(
+                CONF_SHOW_INACTIVE_WAN,
+                self.config_entry.data.get(CONF_SHOW_INACTIVE_WAN, DEFAULT_SHOW_INACTIVE_WAN)
+            )
+            new_show_inactive = user_input.get(CONF_SHOW_INACTIVE_WAN, DEFAULT_SHOW_INACTIVE_WAN)
             
-            if current_enable != enable_scheduling or current_interval != schedule_interval:
-                self.hass.async_create_task(
-                    self.hass.config_entries.async_reload(self.config_entry.entry_id)
-                )
+            needs_reload = (current_enable != enable_scheduling or 
+                           current_interval != schedule_interval or 
+                           current_show_inactive != new_show_inactive)
+            
+            result = self.async_create_entry(title="", data=user_input)
+            
+            # Reload AFTER entry is created if settings changed
+            # Use async_call_later to ensure options are saved first
+            if needs_reload:
+                async def _reload_entry(_now):
+                    await self.hass.config_entries.async_reload(self.config_entry.entry_id)
+                
+                from homeassistant.helpers.event import async_call_later
+                async_call_later(self.hass, 1, _reload_entry)
             
             return result
         

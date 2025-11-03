@@ -204,7 +204,7 @@ class UniFiHardwareAPI(UniFiAPIBase):
             resp = self._request(self.session.get, path)
             body = resp.json()
         except Exception as e:
-            _LOGGER.debug(f"WAN status map fetch failed: {e}")
+            _LOGGER.debug(f"WAN status map fetch failed at request stage: {e}")
             return {}
 
         devices: List[Dict[str, Any]] = []
@@ -213,22 +213,33 @@ class UniFiHardwareAPI(UniFiAPIBase):
         elif isinstance(body, list):
             devices = body
 
+        _LOGGER.info(f"Found {len(devices)} devices")
+
         # Find gateway device
         gw = None
         for d in devices:
             t = (d.get("type") or d.get("device_type") or "").lower()
             model = (d.get("model") or d.get("shortname") or "").lower()
+            _LOGGER.debug(f"Device: type={t}, model={model}")
             if t in ("udm", "udmpro", "udm-se", "ugw", "usg", "uxg") or any(x in model for x in ["udm", "ugw", "usg"]):
                 gw = d
+                _LOGGER.info(f"Found gateway device: type={t}, model={model}")
                 break
                 
         if not gw:
+            _LOGGER.debug("No gateway device found in device list")
             return {}
 
         status_map: Dict[str, Dict[str, Any]] = {}
         
         # Parse interface table
         if_table = gw.get("if_table") or gw.get("ifTable")
+        if not if_table:
+            _LOGGER.debug("Gateway device has no if_table or ifTable")
+            return {}
+            
+        _LOGGER.info(f"Gateway has {len(if_table) if isinstance(if_table, list) else 0} interfaces")
+        
         if isinstance(if_table, list):
             for it in if_table:
                 name = it.get("name") or it.get("ifname")
@@ -236,8 +247,38 @@ class UniFiHardwareAPI(UniFiAPIBase):
                     continue
                 up = bool(it.get("up", it.get("link_state", it.get("active", False))))
                 ip = it.get("ip") or it.get("ip_address") or None
-                status_map[name] = {"up": up, "ip": ip}
+                
+                # Additional info to determine if WAN is truly active
+                speed = it.get("speed") or 0
+                full_duplex = it.get("full_duplex", False)
+                rx_bytes = it.get("rx_bytes", 0)
+                tx_bytes = it.get("tx_bytes", 0)
+                
+                # Consider WAN truly active if:
+                # 1. Link is up
+                # 2. Has valid IP (not 0.x.x.x)
+                # 3. Has speed negotiated (speed > 0)
+                # 4. Has some traffic (rx_bytes or tx_bytes > 0)
+                is_active = (
+                    up and 
+                    ip and 
+                    not str(ip).startswith('0.') and
+                    speed > 0 and
+                    (rx_bytes > 0 or tx_bytes > 0)
+                )
+                
+                status_map[name] = {
+                    "up": up, 
+                    "ip": ip,
+                    "speed": speed,
+                    "full_duplex": full_duplex,
+                    "rx_bytes": rx_bytes,
+                    "tx_bytes": tx_bytes,
+                    "is_active": is_active
+                }
+                _LOGGER.debug(f"Interface {name}: up={up}, ip={ip}, speed={speed}, rx={rx_bytes}, tx={tx_bytes}, is_active={is_active}")
 
+        _LOGGER.info(f"WAN status map built with {len(status_map)} interfaces")
         return status_map
 
     def test_connection(self) -> bool:
