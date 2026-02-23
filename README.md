@@ -450,6 +450,10 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 This integration is not affiliated with Ubiquiti Inc. or UI.com. All product names, logos, and brands are property of their respective owners.
 
+## 🙏 Acknowledgments
+
+- **Icon Design**: Thanks to [@esand](https://github.com/esand) for creating the integration icon!
+
 [releases-shield]: https://img.shields.io/github/release/tfam/ha_unifi_speedtest.svg
 [releases]: https://github.com/tfam/ha_unifi_speedtest/releases
 [maintenance-shield]: https://img.shields.io/maintenance/yes/2024.svg

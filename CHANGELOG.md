@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [3.0.0] - 2025-11-02
+## [3.0.0] - 2026-02-23
 
 Focus: Simpler, more robust implementation using official UniFi APIs, proper Multi-WAN support, and better UX.
 
@@ -56,6 +56,9 @@ Focus: Simpler, more robust implementation using official UniFi APIs, proper Mul
   - Devices use compact format with both WAN group (`WAN/WAN2/...`) and interface (e.g., `eth9`)
   - Primary/Secondary role shown in device name for easy identification
   - Sensor names simplified: "Download Speed WAN", "Upload Speed WAN2", etc.
+- **Integration icon**
+  - Added custom icon for Home Assistant integration branding
+  - Thanks to @esand for the icon design (issue #35)
 
 ### Changes
 - **No more login churn**
