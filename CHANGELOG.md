@@ -2,6 +2,117 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.0.0] - 2026-02-23
+
+Focus: Simpler, more robust implementation using official UniFi APIs, proper Multi-WAN support, and better UX.
+
+### Breaking changes
+- **Authentication switched to API Key or Username/Password**
+  - UDM/UniFi OS controllers use API Key authentication (sent via the `X-API-KEY` header)
+  - Self-hosted controllers use username/password authentication with session management
+  - You must select your controller type during setup (UDM or Self-hosted)
+- **Configuration flow updated**
+  - Two-step process: First select controller type, then provide credentials
+  - UDM: Requires Base URL, API Key, and Site
+  - Self-hosted: Requires Base URL, Username, Password, and Site
+  - Optional: Verify SSL, Enable Multi-WAN, Show Inactive WANs
+- **Sensor naming updated for Multi-WAN**
+  - Multi-WAN sensor names are now compact: `Download Speed WAN`, `Upload Speed WAN2`, `Ping WAN`
+  - Primary/Secondary role displayed in device name: "HA Unifi Speedtest Primary WAN [WAN - eth9]"
+  - If you had pinned entities by name in dashboards/automations, you may need to update them after upgrading
+- **First-time entity creation now happens after data is present**
+  - Multi-WAN entities are created dynamically once speed test data exists for a WAN, avoiding ghost/placeholder entities
+  - Entities for new WANs are added automatically when they become active
+
+### New
+- **Separated API architecture**
+  - Hardware API (`api_hardware.py`) for UDM/UniFi OS with API key authentication
+  - Software API (`api_software.py`) for self-hosted controllers with session authentication
+  - Base API class (`api_base.py`) with common functionality
+  - Factory pattern (`api_factory.py`) for clean API instantiation
+- **Official UniFi API usage throughout**
+  - Sites: `GET /proxy/network/integration/v1/sites`
+  - WANs (for discovery): `GET /proxy/network/integration/v1/sites/{siteId}/wans`
+  - Speedtest history: `GET /proxy/network/v2/api/site/{site}/speedtest`
+  - Trigger test (with fallbacks):
+    - `POST /proxy/network/api/s/{site}/cmd/devmgr/speedtest`
+    - `POST /proxy/network/api/s/{site}/cmd/devmgr` with `{ "cmd": "speedtest" }`
+    - `POST /proxy/network/v2/api/site/{site}/speedtest`
+- **Proper Multi-WAN sensors**
+  - Creates sensors per WAN group (WAN, WAN2, WAN3, …) based on actual speedtest results
+  - Each WAN interface gets its own device in Home Assistant
+  - Primary/Secondary role detection improved (prefers `WAN`, otherwise most capable/recent)
+- **Button platform**
+  - "Run Speedtest (All WANs)" button for triggering tests on all interfaces
+  - Per-WAN buttons (e.g., `Run Speedtest (WAN2 - eth9)`) created dynamically once that WAN has data
+- **Faster UI updates after a test**
+  - Follow-up data refreshes scheduled automatically after manual and scheduled test triggers (e.g., ~10/30/60/120s)
+  - Results appear quickly without waiting for the next polling interval
+- **Option: Show inactive WANs (default: hidden)**
+  - By default, WANs with no link or no IP are hidden from sensors
+  - New option in config flow allows showing inactive WANs if desired
+  - Helps reduce clutter when WANs are temporarily disconnected
+- **Clearer device and sensor names**
+  - Devices use compact format with both WAN group (`WAN/WAN2/...`) and interface (e.g., `eth9`)
+  - Primary/Secondary role shown in device name for easy identification
+  - Sensor names simplified: "Download Speed WAN", "Upload Speed WAN2", etc.
+- **Integration icon**
+  - Added custom icon for Home Assistant integration branding
+  - Thanks to @esand for the icon design (issue #35)
+
+### Changes
+- **No more login churn**
+  - UDM integration reuses a single session with API Key; no CSRF or credential logins
+  - Self-hosted integration maintains session with proper cookie management
+- **Scheduling improvements**
+  - Randomized delay (0-60s) to avoid thundering herd on the controller
+  - Automatic post-test refreshes to surface results faster
+  - Polling interval automatically derived from schedule interval when enabled
+- **Error handling & logging**
+  - Better mapping of common errors in config flow (`invalid_auth`, `cannot_connect`, `unknown`)
+  - More informative logs for HTTP errors (constructed vs actual request URL, status, snippet of body)
+  - Graceful degradation when API endpoints are unavailable
+- **Safer entity creation**
+  - Multi-WAN sensors/buttons are added only for WANs that report data (and, by default, are active)
+  - Avoids duplicates and placeholder entities
+  - Dynamic addition of new WANs without requiring integration reload
+
+### Fixed
+- **Only "WAN" showing issue**
+  - Now discovers and exposes all configured WAN groups (WAN2, WAN3, …) when test data exists
+  - Each WAN gets its own device with separate sensors
+- **Triggering tests inconsistently (404 or wrong method)**
+  - Now always uses `POST` and tries multiple officially supported endpoints to handle firmware differences
+  - Fallback logic ensures tests trigger successfully across different UniFi OS versions
+- **Over-eager login attempts / session churn**
+  - Replaced with API key session reuse for UDM
+  - Proper session management for self-hosted controllers
+- **Entity device reference warnings**
+  - Removed invalid `via_device` references that caused deprecation warnings
+  - Each WAN device is now independent
+
+### Migration notes
+1. **For UDM users**: Generate an API key on your UDM/UniFi OS:
+   - Go to Settings → Admins → [Your Admin] → API Key
+   - Copy the generated key
+2. **For self-hosted controller users**: Ensure you have admin credentials
+3. In Home Assistant:
+   - Remove the old configuration entry if upgrading from 2.x
+   - Add the integration again:
+     - Select controller type (UDM or Self-hosted)
+     - Provide credentials (API Key for UDM, Username/Password for Self-hosted)
+     - URL: `https://<your-udm-or-controller>`
+     - Site: usually `default`
+     - Verify SSL: toggle off for self-signed certificates
+4. If dashboards reference old entity names, update them to the new compact naming
+5. Optional: Enable "Show inactive WANs" in integration options if you want to display unplugged/no-IP WANs
+
+### Notes
+- Multi-WAN entities appear after a speedtest result is available per WAN
+- Consider running a manual test via the new buttons to seed data quickly after setup
+- Per-WAN buttons appear once a WAN has been observed in speedtest data and (by default) is active
+- The integration now uses a cleaner, more maintainable codebase with separated concerns
+
 ## [2.2.0] - 2025-10-10
 
 ### Major Changes

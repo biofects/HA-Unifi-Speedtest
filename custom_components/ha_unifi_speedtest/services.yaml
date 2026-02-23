@@ -1,6 +1,25 @@
 start_speed_test:
   name: Start Speed Test
-  description: Manually start a speed test on the UniFi controller
+  description: Manually start a speed test on the UniFi controller. Can test all WANs or a specific interface.
+  fields:
+    config_entry_id:
+      name: Config Entry ID
+      description: The configuration entry ID for the specific UniFi controller (optional - will use first available if not specified)
+      required: false
+      example: "01234567890abcdef"
+      selector:
+        text:
+    interface_name:
+      name: Interface Name
+      description: Optional WAN interface name to test (e.g., eth9, eth10). Leave empty to test all WANs.
+      required: false
+      example: "eth9"
+      selector:
+        text:
+
+get_speed_test_status:
+  name: Get Speed Test Status
+  description: Retrieve the current speed test results from the UniFi controller
   fields:
     config_entry_id:
       name: Config Entry ID
@@ -10,9 +29,9 @@ start_speed_test:
       selector:
         text:
 
-get_speed_test_status:
-  name: Get Speed Test Status
-  description: Retrieve the current speed test results from the UniFi controller
+get_wan_interfaces:
+  name: Get WAN Interfaces
+  description: Retrieve the list of configured WAN interfaces from the UniFi controller
   fields:
     config_entry_id:
       name: Config Entry ID

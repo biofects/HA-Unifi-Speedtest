@@ -5,29 +5,35 @@ INTEGRATION_NAME = "HA Unifi Speedtest"
 DEFAULT_NAME = "HA Unifi Speedtest"
 
 # Platforms supported by this integration
-PLATFORMS = ["sensor"]
+PLATFORMS = ["sensor", "button"]
 
 # Configuration keys
 CONF_URL = "url"
 CONF_USERNAME = "username"
 CONF_PASSWORD = "password"
+CONF_API_KEY = "api_key"
 CONF_SITE = "site"
 CONF_VERIFY_SSL = "verify_ssl"
 CONF_CONTROLLER_TYPE = "controller_type"
+CONF_HAS_ADMIN = "has_admin_access"  # Whether user has admin privileges
 CONF_ENABLE_SCHEDULING = "enable_scheduling"
 CONF_SCHEDULE_INTERVAL = "schedule_interval"
 CONF_POLLING_INTERVAL = "polling_interval"
 CONF_ENABLE_MULTI_WAN = "enable_multi_wan"  # New configuration for multi-WAN support
+CONF_SHOW_INACTIVE_WAN = "show_inactive_wans"
 
 # Service names
 SERVICE_START_SPEED_TEST = "start_speed_test"
 SERVICE_GET_SPEED_TEST_STATUS = "get_speed_test_status"
+SERVICE_GET_WAN_INTERFACES = "get_wan_interfaces"
 
 # Default values - Conservative settings to prevent 403 errors
+DEFAULT_HAS_ADMIN = True  # Assume admin access by default for backward compatibility
 DEFAULT_SCHEDULE_INTERVAL = 90  # 90 minutes (conservative to avoid rate limiting)
 DEFAULT_ENABLE_SCHEDULING = True
 DEFAULT_POLLING_INTERVAL = 30  # 30 minutes (auto-calculated when not specified)
 DEFAULT_ENABLE_MULTI_WAN = True  # Enable multi-WAN detection by default
+DEFAULT_SHOW_INACTIVE_WAN = False
 
 # Rate limiting constants
 MIN_SCHEDULE_INTERVAL = 15  # Minimum 15 minutes between speed tests

@@ -12,8 +12,8 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, SensorStateClass
 
-from .const import DOMAIN, INTEGRATION_NAME, CONF_SCHEDULE_INTERVAL, CONF_ENABLE_SCHEDULING, CONF_POLLING_INTERVAL, CONF_ENABLE_MULTI_WAN
-from .api import UniFiAPI
+from .const import DOMAIN, INTEGRATION_NAME, CONF_SCHEDULE_INTERVAL, CONF_ENABLE_SCHEDULING, CONF_POLLING_INTERVAL, CONF_ENABLE_MULTI_WAN, CONF_HAS_ADMIN
+from .api_base import UniFiAPIBase
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,10 +32,10 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback
 ) -> bool:
     """Set up the UniFi Speed Test sensors."""
-    _LOGGER.info("Setting up UniFi Speed Test sensors.")
+    _LOGGER.debug("Setting up UniFi Speed Test sensors")
     # Retrieve the API instance from hass.data
-    api = hass.data[DOMAIN][config_entry.entry_id]
-    _LOGGER.info(f"API instance retrieved: {api}")
+    api: UniFiAPIBase = hass.data[DOMAIN][config_entry.entry_id]
+    _LOGGER.debug(f"API instance retrieved: {api}")
 
     # Create a tracker for speed test runs with persistence
     store = Store(hass, 1, f"{DOMAIN}_{config_entry.entry_id}_tracker")
@@ -58,7 +58,18 @@ async def async_setup_entry(
                 _LOGGER.warning(f"Too many 403 errors ({health.get('consecutive_403s')}), skipping API call")
                 return coordinator.data if coordinator.data else {'download': None, 'upload': None, 'ping': None}
             
-            return await hass.async_add_executor_job(api.get_speed_test_status)
+            # Fetch speed test status
+            speed_test_data = await hass.async_add_executor_job(api.get_speed_test_status)
+            
+            # Also update WAN status map for availability checking (UDM only)
+            if api.controller_type == 'udm':
+                try:
+                    wan_status = await hass.async_add_executor_job(api.get_wan_status_map)
+                    hass.data[DOMAIN][f"{config_entry.entry_id}_wan_status"] = wan_status
+                except Exception as e:
+                    _LOGGER.debug(f"Could not update WAN status map: {e}")
+            
+            return speed_test_data
             
         except Exception as e:
             error_str = str(e).lower()
@@ -78,8 +89,21 @@ async def async_setup_entry(
                 return coordinator.data if coordinator.data else {'download': None, 'upload': None, 'ping': None}
 
     # Get scheduling configuration from config entry options or data
+    has_admin = config_entry.options.get(CONF_HAS_ADMIN,
+                                        config_entry.data.get(CONF_HAS_ADMIN, True))
     enable_scheduling = config_entry.options.get(CONF_ENABLE_SCHEDULING, 
                                                config_entry.data.get(CONF_ENABLE_SCHEDULING, True))
+    # Multi-WAN enable
+    enable_multi_wan = config_entry.options.get(CONF_ENABLE_MULTI_WAN,
+                                               config_entry.data.get(CONF_ENABLE_MULTI_WAN, True))
+    show_inactive_wans = config_entry.options.get('show_inactive_wans',
+                                                 config_entry.data.get('show_inactive_wans', False))
+
+    # Disable scheduling if user doesn't have admin access
+    if not has_admin and enable_scheduling:
+        _LOGGER.warning("Automatic speed tests disabled: Administrator privileges required to trigger speed tests")
+        enable_scheduling = False
+    
     schedule_interval = config_entry.options.get(CONF_SCHEDULE_INTERVAL, 
                                                config_entry.data.get(CONF_SCHEDULE_INTERVAL, 90))
 
@@ -108,6 +132,9 @@ async def async_setup_entry(
         update_method=async_update_data,
         update_interval=timedelta(minutes=polling_interval)
     )
+
+    # Expose coordinator for services to trigger refreshes after manual tests
+    hass.data[DOMAIN][f"{config_entry.entry_id}_coordinator"] = coordinator
 
     async def run_scheduled_speedtest(now=None):
         """Run speed test and track execution with enhanced error handling"""
@@ -140,6 +167,14 @@ async def async_setup_entry(
             await speed_test_tracker.async_save()
             _LOGGER.info("Scheduled speed test started successfully")
             
+            # Post-test: schedule a few refreshes to populate data quickly
+            async def _post_test_refreshes():
+                for t in (20, 60, 120):
+                    await asyncio.sleep(t)
+                    _LOGGER.debug(f"Post-test refresh after {t}s")
+                    await coordinator.async_request_refresh()
+            hass.async_create_task(_post_test_refreshes())
+
         except Exception as e:
             error_str = str(e).lower()
             if "403" in error_str or "forbidden" in error_str:
@@ -157,12 +192,14 @@ async def async_setup_entry(
 
     # Set up automatic speed tests if enabled
     if enable_scheduling:
+        _LOGGER.info(f"[SCHEDULER] Setting up automatic speed tests for {api.controller_type} controller every {schedule_interval} minutes")
         _LOGGER.info(f"Setting up automatic speed tests for {api.controller_type} controller every {schedule_interval} minutes")
         _LOGGER.info(f"Data will be polled every {polling_interval} minutes")
         
         # Schedule the speed test at user-defined interval
         interval = timedelta(minutes=schedule_interval)
         remove_scheduled_listener = async_track_time_interval(hass, run_scheduled_speedtest, interval)
+        _LOGGER.info(f"[SCHEDULER] Speed test scheduled every {schedule_interval} minutes - SCHEDULER ACTIVE!")
         _LOGGER.info(f"Speed test scheduled every {schedule_interval} minutes")
 
         # Store the listener removal function so we can clean it up later
@@ -171,6 +208,14 @@ async def async_setup_entry(
         # Store intervals in data for reference
         hass.data[DOMAIN][f"{config_entry.entry_id}_schedule_interval"] = schedule_interval
         hass.data[DOMAIN][f"{config_entry.entry_id}_polling_interval"] = polling_interval
+
+        # Trigger one initial speed test soon after startup to seed data
+        async def _initial_seed():
+            seed_delay = random.randint(10, 45)
+            _LOGGER.info(f"Scheduling initial seed speed test in ~{seed_delay}s")
+            await asyncio.sleep(seed_delay)
+            await run_scheduled_speedtest()
+        hass.async_create_task(_initial_seed())
     else:
         _LOGGER.info(f"Automatic speed test scheduling disabled for {api.controller_type} controller")
         _LOGGER.info(f"Data will be polled every {polling_interval} minutes")
@@ -178,88 +223,173 @@ async def async_setup_entry(
     _LOGGER.info("Coordinator created, refreshing config entry.")
     await coordinator.async_config_entry_first_refresh()
 
-    # Create sensors based on user-configured controller type
-    _LOGGER.info(f"Creating sensors for configured controller type: {api.controller_type}")
+    # Track created WAN sensor keys to avoid duplicates and enable dynamic additions
+    created_wan_keys: set[str] = set()
+    hass.data[DOMAIN][f"{config_entry.entry_id}_created_wans"] = created_wan_keys
 
-    # Create sensors based on controller type and actual WAN connections
-    sensors = []
-    coordinator_data = coordinator.data
+    # Clean up entities that shouldn't exist based on current configuration
+    from homeassistant.helpers import entity_registry as er
+    entity_reg = er.async_get(hass)
     
-    if api.controller_type == 'udm':
-        # UDM controllers support dual-WAN - check for multiple WAN interfaces
-        _LOGGER.info("UDM controller detected - checking for multiple WAN interfaces")
-        
-        if (coordinator_data and 
-            isinstance(coordinator_data, dict) and 
-            'multi_wan_enabled' in coordinator_data and 
-            coordinator_data.get('wan_interfaces')):
-            
-            wan_interfaces = coordinator_data['wan_interfaces']
-            connected_wans = []
-            
-            # Check which WANs are actually connected and have data
-            for i, wan_interface in enumerate(wan_interfaces):
-                interface_name = wan_interface.get('interface_name', f'wan{i+1}')
-                wan_group = wan_interface.get('wan_networkgroup', f'WAN{i+1}')
-                
-                # Check if this WAN is connected (has any data or shows as active)
-                has_data = any([
-                    wan_interface.get('download') is not None,
-                    wan_interface.get('upload') is not None,
-                    wan_interface.get('ping') is not None
-                ])
-                
-                status = wan_interface.get('status', 'unknown')
-                is_connected = has_data or status in ['ok', 'active', 'up', 'connected']
-                
-                if is_connected:
-                    connected_wans.append((i, wan_interface, interface_name, wan_group))
-                    _LOGGER.info(f"Connected WAN found: {wan_group} ({interface_name})")
+    # Get all entities for this integration
+    entities = er.async_entries_for_config_entry(entity_reg, config_entry.entry_id)
+    
+    # Determine which WAN interfaces should exist
+    should_exist_wans = set()
+    if coordinator.data and isinstance(coordinator.data, dict) and coordinator.data.get('wan_interfaces'):
+        for wan in coordinator.data['wan_interfaces']:
+            interface_name = wan.get('interface_name') or wan.get('interface')
+            if interface_name:
+                # Check if this WAN should have entities based on show_inactive_wans setting
+                if show_inactive_wans:
+                    should_exist_wans.add(interface_name)
                 else:
-                    _LOGGER.info(f"WAN {wan_group} ({interface_name}) appears disconnected or no data")
-            
-            if len(connected_wans) >= 2:
-                # Create entities for both connected WANs
-                _LOGGER.info(f"Creating entities for {len(connected_wans)} connected WAN interfaces")
-                for i, wan_interface, interface_name, wan_group in connected_wans:
-                    sensors.extend([
-                        UniFiSpeedTestSensorMultiWAN(coordinator, f"Download Speed {wan_group}", "download", interface_name, wan_group, i),
-                        UniFiSpeedTestSensorMultiWAN(coordinator, f"Upload Speed {wan_group}", "upload", interface_name, wan_group, i),
-                        UniFiSpeedTestSensorMultiWAN(coordinator, f"Ping {wan_group}", "ping", interface_name, wan_group, i),
-                    ])
-                    
-            elif len(connected_wans) == 1:
-                # Only one WAN connected - create single device with cleaner names
-                _LOGGER.info("Only one WAN connected - creating single WAN device")
-                i, wan_interface, interface_name, wan_group = connected_wans[0]
-                sensors.extend([
-                    UniFiSpeedTestSensorMultiWAN(coordinator, f"Download Speed", "download", interface_name, "Primary WAN", i),
-                    UniFiSpeedTestSensorMultiWAN(coordinator, f"Upload Speed", "upload", interface_name, "Primary WAN", i),
-                    UniFiSpeedTestSensorMultiWAN(coordinator, f"Ping", "ping", interface_name, "Primary WAN", i),
-                ])
-            else:
-                # No connected WANs detected - fall back to legacy sensors and warn user
-                _LOGGER.warning("No connected WAN interfaces detected on UDM")
-                _LOGGER.warning("This may indicate no speedtests have been run yet")
-                _LOGGER.warning("Creating basic sensors - run a speedtest from UDM interface to populate data")
-                sensors.extend([
-                    UniFiSpeedTestSensor(coordinator, "Download Speed", "download"),
-                    UniFiSpeedTestSensor(coordinator, "Upload Speed", "upload"),
-                    UniFiSpeedTestSensor(coordinator, "Ping", "ping"),
-                ])
-        else:
-            # No multi-WAN data available for UDM - create legacy sensors
-            _LOGGER.info("UDM controller but no multi-WAN data available, creating single device")
-            _LOGGER.info("Run a speedtest from the UDM interface to populate speedtest data")
-            sensors.extend([
-                UniFiSpeedTestSensor(coordinator, "Download Speed", "download"),
-                UniFiSpeedTestSensor(coordinator, "Upload Speed", "upload"),
-                UniFiSpeedTestSensor(coordinator, "Ping", "ping"),
-            ])
+                    # Only include if it has actual speedtest data
+                    download = wan.get('download')
+                    upload = wan.get('upload')
+                    if (download is not None and download > 0) or (upload is not None and upload > 0):
+                        should_exist_wans.add(interface_name)
     
+    _LOGGER.info(f"WANs that should exist: {should_exist_wans}")
+    
+    # Remove entities for WANs that shouldn't exist
+    for entity in entities:
+        # Check if this is a WAN-specific entity (has eth in unique_id)
+        if entity.platform == "sensor" and "_eth" in entity.unique_id:
+            # Extract interface name from unique_id (format: ha_unifi_speedtest_download_eth9_WAN)
+            parts = entity.unique_id.split("_")
+            for i, part in enumerate(parts):
+                if part.startswith("eth"):
+                    interface_name = part
+                    if interface_name not in should_exist_wans:
+                        _LOGGER.debug(f"Removing entity {entity.entity_id} for inactive WAN {interface_name}")
+                        entity_reg.async_remove(entity.entity_id)
+                    break
+
+    # Helper to build a canonical WAN key
+    def _wan_key(interface_name: str, wan_group: str) -> str:
+        return f"{interface_name}_{wan_group}"
+
+    # Create sensors based on controller type and actual/pre-discovered WAN connections
+    sensors: list[SensorEntity] = []
+    coordinator_data = coordinator.data
+
+    if api.controller_type == 'udm' and enable_multi_wan:
+        _LOGGER.info("UDM controller detected with Multi-WAN enabled - sensors will appear after first speed test")
+
+        # Build status map to filter offline/unassigned WANs and store in hass.data
+        try:
+            wan_status_map = await hass.async_add_executor_job(api.get_wan_status_map)
+            hass.data[DOMAIN][f"{config_entry.entry_id}_wan_status"] = wan_status_map
+            _LOGGER.debug(f"WAN status map fetched: {wan_status_map}")
+            for iface, status in wan_status_map.items():
+                _LOGGER.debug(f"  Interface {iface}: up={status.get('up')}, ip={status.get('ip')}, speed={status.get('speed')}, rx_bytes={status.get('rx_bytes')}, tx_bytes={status.get('tx_bytes')}, is_active={status.get('is_active')}")
+        except Exception as e:
+            _LOGGER.debug(f"Failed to get WAN status map: {e}")
+            wan_status_map = {}
+            hass.data[DOMAIN][f"{config_entry.entry_id}_wan_status"] = {}
+
+        # Helper to create multi-wan sensors for a given interface
+        def _create_multiwan_sensors(interface_name: str, wan_group: str, ordinal_index: int) -> list[SensorEntity]:
+            key = _wan_key(interface_name, wan_group)
+            if key in created_wan_keys:
+                return []
+            created_wan_keys.add(key)
+            _LOGGER.info(f"Creating Multi-WAN sensors for {wan_group} ({interface_name})")
+            pretty_group = wan_group
+            return [
+                UniFiSpeedTestSensorMultiWAN(coordinator, f"Download Speed {pretty_group}", "download", interface_name, wan_group, ordinal_index, show_inactive_wans, config_entry.entry_id),
+                UniFiSpeedTestSensorMultiWAN(coordinator, f"Upload Speed {pretty_group}", "upload", interface_name, wan_group, ordinal_index, show_inactive_wans, config_entry.entry_id),
+                UniFiSpeedTestSensorMultiWAN(coordinator, f"Ping {pretty_group}", "ping", interface_name, wan_group, ordinal_index, show_inactive_wans, config_entry.entry_id),
+            ]
+
+        def _is_wan_active(interface_name: str) -> bool:
+            """Check if WAN should have sensors created based on show_inactive_wans setting.
+            
+            When show_inactive_wans=True: Always return True (create all sensors, availability handles status)
+            When show_inactive_wans=False: Only return True for active WANs (don't create inactive sensors)
+            """
+            if show_inactive_wans:
+                # Create sensors for all WANs - availability property will handle marking inactive ones
+                return True
+            
+            if not interface_name:
+                return False  # Don't create sensors for unknown interfaces
+            
+            st = wan_status_map.get(interface_name)
+            
+            # If we have status map data, use it
+            if st:
+                # Use the is_active flag if available (considers link, IP, speed, and traffic)
+                if "is_active" in st:
+                    return st["is_active"]
+                
+                # Fallback to old logic: Only create sensor if WAN has link up AND valid IP
+                if st.get('up') and (st.get('ip') and not str(st.get('ip')).startswith('0.') ):
+                    return True
+                return False
+            
+            # No status map data - check if this WAN has actual speedtest results
+            # Find this WAN in coordinator data and check if it has real data
+            if coordinator_data and isinstance(coordinator_data, dict):
+                wan_interfaces = coordinator_data.get('wan_interfaces', [])
+                for wan in wan_interfaces:
+                    wan_iface = wan.get('interface_name') or wan.get('interface')
+                    if wan_iface == interface_name:
+                        # Check if it has actual speedtest data (not None/null and not 0)
+                        download = wan.get('download')
+                        upload = wan.get('upload')
+                        # Only create sensor if it has real speed test data (non-zero values)
+                        if (download is not None and download > 0) or (upload is not None and upload > 0):
+                            return True
+                        return False
+            
+            # Unknown status and no speedtest data - don't create to be safe
+            return False
+
+        # 1) If coordinator already has data with wan_interfaces, create sensors now
+        if (coordinator_data and isinstance(coordinator_data, dict) and coordinator_data.get('wan_interfaces')):
+            _LOGGER.debug(f"Found {len(coordinator_data['wan_interfaces'])} WAN interfaces in coordinator data")
+            for idx, wan_interface in enumerate(coordinator_data['wan_interfaces']):
+                interface_name = wan_interface.get('interface_name') or wan_interface.get('interface') or 'unknown'
+                wan_group = wan_interface.get('wan_networkgroup') or 'WAN'
+                download = wan_interface.get('download')
+                upload = wan_interface.get('upload')
+                _LOGGER.debug(f"Checking WAN interface: {interface_name} ({wan_group}) - download={download}, upload={upload}")
+                if not _is_wan_active(interface_name):
+                    _LOGGER.debug(f"Skipping inactive/unassigned WAN interface: {interface_name}")
+                    continue
+                _LOGGER.info(f"Creating sensors for active WAN interface: {interface_name}")
+                sensors.extend(_create_multiwan_sensors(interface_name, str(wan_group), idx))
+
+
+        # Register a coordinator listener to dynamically add new WAN sensors when discovered later
+        def _coordinator_listener():
+            data = coordinator.data
+            if not data or not isinstance(data, dict):
+                return
+            wan_list = data.get('wan_interfaces') or []
+            new_entities: list[SensorEntity] = []
+            for idx, wan_interface in enumerate(wan_list):
+                i_name = wan_interface.get('interface_name') or wan_interface.get('interface')
+                if not i_name:
+                    continue
+                if not _is_wan_active(i_name):
+                    continue
+                w_group = wan_interface.get('wan_networkgroup') or 'WAN'
+                key = _wan_key(i_name, str(w_group))
+                if key not in created_wan_keys:
+                    new_entities.extend(_create_multiwan_sensors(i_name, str(w_group), idx))
+            if new_entities:
+                _LOGGER.info(f"Discovered new active WAN interfaces at runtime, adding {len(new_entities)} entities")
+                async_add_entities(new_entities)
+
+        # Attach listener
+        coordinator.async_add_listener(_coordinator_listener)
+
     else:
-        # Traditional controller - only supports single WAN
-        _LOGGER.info("Traditional controller detected - creating single WAN device")
+        # Traditional controller or multi-wan disabled - single WAN
+        _LOGGER.info("Traditional controller or multi-WAN disabled - creating single WAN device")
         sensors.extend([
             UniFiSpeedTestSensor(coordinator, "Download Speed", "download"),
             UniFiSpeedTestSensor(coordinator, "Upload Speed", "upload"),
@@ -431,6 +561,11 @@ class UniFiSpeedTestSensor(CoordinatorEntity, SensorEntity):
         self._name = name
         self._data_key = data_key
         self._state = None
+        
+        # Validate data_key to prevent unit_of_measurement errors
+        if data_key not in ["download", "upload", "ping"]:
+            _LOGGER.error(f"INVALID data_key '{data_key}' for sensor {name}! Must be 'download', 'upload', or 'ping'")
+        
         _LOGGER.info(f"Sensor initialized: {self._name} ({self._data_key})")
 
     @property
@@ -450,19 +585,26 @@ class UniFiSpeedTestSensor(CoordinatorEntity, SensorEntity):
     @property
     def unit_of_measurement(self) -> str:
         """Return the unit of measurement following Home Assistant standards."""
+        # CRITICAL: Must return valid unit when device_class is set (HA 2025.x requirement)
+        # NEVER return None to prevent KeyError in HA 2025.x unit conversion
         if self._data_key in ["download", "upload"]:
             return "Mbit/s"  # Changed from "Mbps" to "Mbit/s" to match HA standards
         elif self._data_key == "ping":
             return "ms"
-        return None
+        
+        # Should never reach here if sensors are created correctly
+        _LOGGER.error(f"Sensor {self._name} with data_key '{self._data_key}' has no unit defined!")
+        _LOGGER.error(f"This indicates a bug - sensor was created with invalid data_key")
+        # Return a default to prevent HA 2025.x errors - do NOT return None!
+        return "Mbit/s"
 
     @property
     def device_class(self) -> SensorDeviceClass | None:
         """Return the device class for the sensor."""
+        # Only set device_class when we have a valid unit to avoid HA 2025.x errors
         if self._data_key in ["download", "upload"]:
             return SensorDeviceClass.DATA_RATE
-        elif self._data_key == "ping":
-            return SensorDeviceClass.DURATION
+        # Do not set device_class for ping (ms) to avoid unit conversion to seconds
         return None
 
     @property
@@ -495,30 +637,70 @@ class UniFiSpeedTestSensor(CoordinatorEntity, SensorEntity):
 class UniFiSpeedTestSensorMultiWAN(CoordinatorEntity, SensorEntity):
     """Sensor for UniFi Speed Test measurements with multi-WAN support."""
     
-    def __init__(self, coordinator, name, data_key, interface_name, wan_group, wan_index):
+    def __init__(self, coordinator, name, data_key, interface_name, wan_group, wan_index, show_inactive_wans=False, config_entry_id=None):
         super().__init__(coordinator)
         self._name = name
         self._data_key = data_key
         self._interface_name = interface_name
-        self._wan_group = wan_group
-        self._wan_index = wan_index
+        self._wan_group = str(wan_group)
+        self._wan_index = wan_index  # Used only for ordinal display when explicit order unknown
         self._state = None
+        self._wan_key = f"{self._interface_name}_{self._wan_group}"
+        self._show_inactive_wans = show_inactive_wans
+        self._config_entry_id = config_entry_id
+
+        # Validate data_key to prevent unit_of_measurement errors
+        if data_key not in ["download", "upload", "ping"]:
+            _LOGGER.error(f"INVALID data_key '{data_key}' for Multi-WAN sensor {name}! Must be 'download', 'upload', or 'ping'")
+        
         _LOGGER.info(f"Multi-WAN Sensor initialized: {self._name} ({self._data_key}) for {interface_name}/{wan_group}")
+
+    def _find_my_wan_data(self):
+        """Find the WAN data dict matching this sensor's interface/group in coordinator data."""
+        data = self.coordinator.data
+        if not data or 'wan_interfaces' not in data:
+            return None, None
+        for idx, wan in enumerate(data['wan_interfaces']):
+            i_name = wan.get('interface_name') or wan.get('interface')
+            w_group = str(wan.get('wan_networkgroup') or 'WAN')
+            if i_name and f"{i_name}_{w_group}" == self._wan_key:
+                return wan, idx
+        # Fallback: try matching by interface only
+        for idx, wan in enumerate(data['wan_interfaces']):
+            if (wan.get('interface_name') or wan.get('interface')) == self._interface_name:
+                return wan, idx
+        return None, None
+
+    def _determine_is_primary_wan(self, wan_data):
+        """Determine if this WAN interface is the primary one using improved logic."""
+        if not self.coordinator.data:
+            return False
+        primary_wan = self.coordinator.data.get('primary_wan')
+        if not primary_wan:
+            return False
+        # Direct key comparison first
+        if primary_wan == self._wan_key:
+            return True
+        # Backward compat: if primary is just interface name
+        primary_interface = primary_wan.split('_')[0] if '_' in str(primary_wan) else primary_wan
+        return primary_interface == self._interface_name
 
     @property
     def name(self) -> str:
-        # Determine if this is primary WAN for better naming
-        if (self.coordinator.data and 
-            'wan_interfaces' in self.coordinator.data and 
-            self._wan_index < len(self.coordinator.data['wan_interfaces'])):
-            wan_data = self.coordinator.data['wan_interfaces'][self._wan_index]
-            is_primary = self._determine_is_primary_wan(wan_data)
-            
-            # Use Primary/Secondary naming for better UX
-            wan_type = "Primary WAN" if is_primary else "Secondary WAN"
-            return f"UniFi Speed Test {self._name.replace(self._wan_group, wan_type)}"
-        
-        return f"UniFi Speed Test {self._name}"
+        # Compact name: UniFi Speed Test Primary [WANx - ethX] DL/UL/Ping
+        wan_data, _ = self._find_my_wan_data()
+        group = self._wan_group
+        iface = self._interface_name
+        metric_suffix = {
+            "download": "DL",
+            "upload": "UL",
+            "ping": "Ping",
+        }.get(self._data_key, self._data_key)
+        role = None
+        if wan_data is not None:
+            role = "Primary" if self._determine_is_primary_wan(wan_data) else "Secondary"
+        prefix = f"UniFi Speed Test {role} " if role else "UniFi Speed Test "
+        return f"{prefix}[{group} - {iface}] {metric_suffix}"
 
     @property
     def unique_id(self) -> str:
@@ -526,20 +708,18 @@ class UniFiSpeedTestSensorMultiWAN(CoordinatorEntity, SensorEntity):
 
     @property
     def state(self) -> StateType:
-        """Get the state from multi-WAN data structure."""
-        if not self.coordinator.data:
+        """Get the state from multi-WAN data structure by matching interface/group, not by index."""
+        data = self.coordinator.data
+        if not data:
             return None
-            
-        # Handle multi-WAN data structure
-        if ('wan_interfaces' in self.coordinator.data and 
-            self._wan_index < len(self.coordinator.data['wan_interfaces'])):
-            wan_data = self.coordinator.data['wan_interfaces'][self._wan_index]
+        # Prefer matching WAN by key
+        wan_data, _ = self._find_my_wan_data()
+        if wan_data is not None:
             value = wan_data.get(self._data_key)
             _LOGGER.debug(f"Getting multi-WAN state for {self._name}: {value}")
             return value
-            
         # Fallback to legacy data structure
-        value = self.coordinator.data.get(self._data_key)
+        value = data.get(self._data_key)
         _LOGGER.debug(f"Getting fallback state for {self._name}: {value}")
         return value
 
@@ -550,25 +730,59 @@ class UniFiSpeedTestSensorMultiWAN(CoordinatorEntity, SensorEntity):
             return "Mbit/s"
         elif self._data_key == "ping":
             return "ms"
-        return None
+        _LOGGER.error(f"Multi-WAN Sensor {self._name} with data_key '{self._data_key}' has no unit defined!")
+        return "Mbit/s"
 
     @property
     def device_class(self) -> SensorDeviceClass | None:
-        """Return the device class for the sensor."""
         if self._data_key in ["download", "upload"]:
             return SensorDeviceClass.DATA_RATE
-        elif self._data_key == "ping":
-            return SensorDeviceClass.DURATION
+        # Do not set device_class for ping since unit is ms, not seconds
         return None
 
     @property
     def state_class(self) -> SensorStateClass | None:
-        """Return the state class for long-term statistics."""
         return SensorStateClass.MEASUREMENT
 
     @property
+    def available(self) -> bool:
+        """Return True if entity is available (coordinator has data and WAN is active)."""
+        # First check if coordinator has data
+        if not self.coordinator.last_update_success or not self.coordinator.data:
+            return False
+        
+        # Always check WAN status regardless of show_inactive_wans setting
+        # When show_inactive_wans=False, sensors won't be created for inactive WANs
+        # When show_inactive_wans=True, all sensors are created but inactive ones show as unavailable
+        
+        # Get WAN status map from hass.data if available
+        try:
+            from homeassistant.core import HomeAssistant
+            hass: HomeAssistant = self.hass
+            wan_status_map = hass.data.get(DOMAIN, {}).get(f"{self._config_entry_id}_wan_status", {})
+        except Exception:
+            # If we can't get status map, assume available to avoid hiding legitimate WANs
+            return True
+        
+        # Check if this WAN interface is active
+        st = wan_status_map.get(self._interface_name)
+        if not st:
+            # Unknown status - assume available to avoid hiding legitimate WANs
+            return True
+        
+        # Use the is_active flag if available (considers link, IP, speed, and traffic)
+        if "is_active" in st:
+            return st["is_active"]
+        
+        # Fallback: Active when link is up AND IP is present (not 0.x.x.x)
+        if st.get('up') and (st.get('ip') and not str(st.get('ip')).startswith('0.')):
+            return True
+        
+        # WAN is inactive/unassigned - mark as unavailable
+        return False
+
+    @property
     def suggested_display_precision(self) -> int | None:
-        """Return the suggested display precision."""
         if self._data_key in ["download", "upload"]:
             return 2
         elif self._data_key == "ping":
@@ -583,74 +797,37 @@ class UniFiSpeedTestSensorMultiWAN(CoordinatorEntity, SensorEntity):
             "wan_networkgroup": self._wan_group,
             "wan_number": self._wan_index + 1,
         }
-        
-        # Add additional WAN interface data if available
-        if (self.coordinator.data and 
-            'wan_interfaces' in self.coordinator.data and 
-            self._wan_index < len(self.coordinator.data['wan_interfaces'])):
-            wan_data = self.coordinator.data['wan_interfaces'][self._wan_index]
-            
-            attributes.update({
-                "total_wan_interfaces": self.coordinator.data.get('total_interfaces', 1),
-                "is_primary_wan": self._determine_is_primary_wan(wan_data),
-                "timestamp": wan_data.get('timestamp'),
-                "status": wan_data.get('status', 'unknown')
-            })
-        
+        data = self.coordinator.data
+        if data and 'wan_interfaces' in data:
+            wan_data, idx = self._find_my_wan_data()
+            if wan_data is not None:
+                attributes.update({
+                    "total_wan_interfaces": data.get('total_interfaces', len(data.get('wan_interfaces', [])) or 1),
+                    "is_primary_wan": self._determine_is_primary_wan(wan_data),
+                    "timestamp": wan_data.get('timestamp'),
+                    "status": wan_data.get('status', 'unknown'),
+                    "wan_index": (idx + 1) if idx is not None else self._wan_index + 1,
+                })
         return attributes
-
-    def _determine_is_primary_wan(self, wan_data):
-        """Determine if this WAN interface is the primary one using improved logic."""
-        if not self.coordinator.data:
-            return False
-            
-        # Get the primary WAN identifier from coordinator data
-        primary_wan = self.coordinator.data.get('primary_wan')
-        if not primary_wan:
-            return False
-        
-        # Method 1: Direct key match
-        current_wan_key = f"{self._interface_name}_{self._wan_group}"
-        if current_wan_key == primary_wan:
-            return True
-            
-        # Method 2: Interface name match (backward compatibility)
-        interface_name = wan_data.get('interface_name', self._interface_name)
-        primary_interface = primary_wan.split('_')[0] if '_' in primary_wan else primary_wan
-        
-        if interface_name == primary_interface:
-            return True
-            
-        # Method 3: Check if this is the first WAN and no clear primary was determined
-        wan_interfaces = self.coordinator.data.get('wan_interfaces', [])
-        if (len(wan_interfaces) > 0 and 
-            self._wan_index == 0 and 
-            primary_wan == list(self.coordinator.data.get('wan_interfaces', [{}]))[0].get('interface_name')):
-            return True
-            
-        return False
 
     @property
     def device_info(self):
         """Return device information about this entity."""
-        # Determine if this is primary WAN for better device naming
-        if (self.coordinator.data and 
-            'wan_interfaces' in self.coordinator.data and 
-            self._wan_index < len(self.coordinator.data['wan_interfaces'])):
-            wan_data = self.coordinator.data['wan_interfaces'][self._wan_index]
-            is_primary = self._determine_is_primary_wan(wan_data)
-            
-            # Use Primary/Secondary device naming
-            device_name = f"{INTEGRATION_NAME} {'Primary WAN' if is_primary else 'Secondary WAN'}"
-        else:
-            device_name = f"{INTEGRATION_NAME} {self._wan_group}"
-            
+        data = self.coordinator.data
+        group = self._wan_group
+        iface = self._interface_name
+        device_name = f"{INTEGRATION_NAME} {group} ({iface})"
+        if data and 'wan_interfaces' in data:
+            wan_data, _ = self._find_my_wan_data()
+            if wan_data is not None:
+                is_primary = self._determine_is_primary_wan(wan_data)
+                role = 'Primary WAN' if is_primary else 'Secondary WAN'
+                device_name = f"{INTEGRATION_NAME} {role} [{group} - {iface}]"
         return {
-            "identifiers": {(DOMAIN, f"unifi_speedtest_{self._wan_group}")},
+            "identifiers": {(DOMAIN, f"unifi_speedtest_{iface}_{group}")},
             "name": device_name,
             "manufacturer": "UniFi",
-            "model": f"WAN Interface {self._interface_name}",
-            "via_device": (DOMAIN, "unifi_speedtest")
+            "model": f"WAN Interface {iface}"
         }
 
 
@@ -719,7 +896,7 @@ class SpeedTestRunsSensor(SensorEntity):
 class UniFiAPIHealthSensor(SensorEntity):
     """Sensor to monitor UniFi API health and rate limiting status."""
     
-    def __init__(self, api: UniFiAPI, name: str):
+    def __init__(self, api: UniFiAPIBase, name: str):
         self._api = api
         self._name = name
         self._attr_unique_id = f"{DOMAIN}_api_health"

@@ -6,9 +6,9 @@
 
 ## 🔍 About
 
-This Home Assistant custom integration provides real-time speed test monitoring for UniFi networks with **enhanced dual WAN support**. It supports all UniFi platforms including UDM Pro, UDM SE, Cloud Key, and traditional UniFi Controller software, allowing you to track download speed, upload speed, and ping directly within Home Assistant.
+This Home Assistant custom integration provides real-time speed test monitoring for UniFi networks with **full Multi-WAN support**. It supports all UniFi platforms including UDM Pro, UDM SE, Cloud Key, and self-hosted UniFi Controller software, allowing you to track download speed, upload speed, and ping directly within Home Assistant.
 
-**🆕 v2.2.0: Smart Controller Detection** - User-controlled controller type selection with intelligent entity creation based on actual WAN connections.
+**🆕 v3.0.0: API Key Authentication & Modular Architecture** - Simplified authentication with API keys for UDM/UniFi OS, username/password for self-hosted controllers, and separated code architecture for better maintainability.
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
 [![GitHub Release](https://img.shields.io/github/v/release/biofects/HA-Unifi-Speedtest?style=flat-square)](https://github.com/biofects/HA-Unifi-Speedtest/releases)
@@ -34,15 +34,18 @@ If you find this plugin useful, please consider donating. Your support is greatl
 
 ## ✨ Features
 
-- **� Smart Controller Detection**: User-controlled selection between UDM and traditional controller types
-- **� Intelligent WAN Management**: UDM controllers automatically detect multiple WANs, traditional controllers use single WAN
-- **📊 Connection-Based Entities**: Only creates entities for actually connected WAN interfaces  
-- **🔧 Universal Compatibility**: Works with UDM Pro, UDM SE, UDM Base, Cloud Key Gen2+, and traditional UniFi Controllers
-- **� Real-time Metrics**: Monitor download speeds, upload speeds, and network latency (ping) for each connected WAN
-- **🚀 Speed Test Initiation**: Start speed tests remotely via Home Assistant (traditional controllers)
+- **🔐 Simplified Authentication**: API key for UDM/UniFi OS, username/password for self-hosted controllers
+- **🎯 Two-Step Configuration**: First select controller type, then provide appropriate credentials
+- **🌐 Full Multi-WAN Support**: Separate devices and sensors for each WAN interface (WAN, WAN2, WAN3, etc.)
+- **📊 Dynamic Entity Creation**: Entities appear automatically once speed test data exists for each WAN
+- **🔧 Universal Compatibility**: Works with UDM Pro, UDM SE, UDM Base, Cloud Key Gen2+, and self-hosted UniFi Controllers
+- **⚡ Real-time Metrics**: Monitor download speeds, upload speeds, and network latency (ping) for each WAN
+- **🚀 Manual Speed Tests**: Button entities for triggering tests on all WANs or specific interfaces
+- **⏱️ Faster Updates**: Automatic refresh scheduling after tests complete for immediate result visibility
 - **🏠 Home Assistant Integration**: Full integration with automations, scripts, and dashboards
-- **⚙️ Clean Naming**: Smart entity names based on number of connected WANs (single WAN gets clean names)
-- **🔒 Reliable Authentication**: Fixed endpoint selection prevents 401/404 errors
+- **🏷️ Clean Naming**: Compact sensor names with Primary/Secondary WAN designation
+- **👁️ Optional Inactive WAN Display**: Choose whether to show disconnected/inactive WAN interfaces
+- **🔒 Reliable API Usage**: Uses official UniFi API endpoints with proper fallback handling
 
 ## 📸 Screenshots
 
@@ -115,80 +118,137 @@ Track your secondary WAN connection independently with its own set of performanc
 
 ## ⚙ Configuration
 
-1. Go to Configuration > Integrations
-2. Click "+" to add a new integration
-3. Search for "HA Unifi Speedtest"
-4. Enter the following details:
-   - **URL**: Your UniFi Controller URL
-     - UDM Pro/SE: `https://udm-ip`
-     - Cloud Key Gen2+: `https://cloudkey-ip`
-     - Traditional Controller: `https://controller-ip:8443`
-   - **Username**: UniFi Controller admin username
-   - **Password**: UniFi Controller admin password
-   - **Controller Type**: Select your controller type  
-     - **UDM Pro/SE/Cloud Key Gen2+** - for UniFi OS devices (supports multi-WAN detection)
-     - **Self-hosted Controller** - for traditional UniFi Controller software (single WAN mode)
-   - **Site** (Optional): Site name (default: "default")
-   - **SSL Verification** (Optional): Enable/disable SSL certificate verification
-   - **Multi-WAN Detection**: Automatically enabled for UDM controllers, disabled for traditional controllers
+### Prerequisites
+
+**For UDM/UniFi OS Controllers:**
+1. Generate an API key in your UniFi controller:
+   - Navigate to Settings → Admins → [Your Admin Account]
+   - Scroll to API section
+   - Click "Create New API Key"
+   - Copy the generated key (you won't be able to see it again!)
+
+**For Self-hosted Controllers:**
+- Admin username and password
+
+### Setup Steps
+
+1. Go to **Settings** → **Devices & Services**
+2. Click **"+ Add Integration"**
+3. Search for **"HA Unifi Speedtest"**
+4. **Step 1: Select Controller Type**
+   - Choose **"UDM/UniFi OS"** for:
+     - UDM Pro, UDM SE, UDM Base
+     - Cloud Key Gen2+
+     - Any UniFi OS-based controller
+   - Choose **"Self-hosted Controller"** for:
+     - Traditional UniFi Network Application
+     - Self-hosted/standalone controllers
+5. **Step 2: Enter Credentials**
+   
+   **For UDM/UniFi OS:**
+   - **URL**: Your controller URL (e.g., `https://192.168.1.1` or `https://unifi.local`)
+   - **API Key**: The API key you generated
+   - **Site** (Optional): Site ID (default: "default")
+   - **Verify SSL**: Enable if using valid SSL certificates
+   - **Enable Multi-WAN**: Enable to detect and monitor multiple WAN interfaces
+   - **Show Inactive WANs**: Show entities for disconnected/inactive WANs
+   
+   **For Self-hosted Controller:**
+   - **URL**: Your controller URL (e.g., `https://192.168.1.10:8443`)
+   - **Username**: Admin username
+   - **Password**: Admin password
+   - **Site** (Optional): Site ID (default: "default")
+   - **Verify SSL**: Enable if using valid SSL certificates
+
+6. **Configure Options** (can be changed later):
    - **Enable Automatic Speed Tests**: Schedule regular speed tests
-   - **Speed Test Interval**: How often to run automatic tests (15-1440 minutes)
+   - **Speed Test Interval**: How often to run tests (15-1440 minutes, default: 90)
+   - **Polling Interval**: How often to check for results (automatically calculated if not specified)
 
 📋 **See the [Screenshots](#-screenshots) section above for visual examples of the configuration process and resulting sensors.**
 
 ## 📡 Sensors
 
+### Multi-WAN Setup (UDM with Multi-WAN Enabled)
+For multi-WAN configurations, separate **devices** are created for each WAN interface, each containing three sensors:
+
+**Primary WAN Device** (e.g., "HA Unifi Speedtest Primary WAN [WAN - eth9]"):
+- **Download Speed WAN** (Mbit/s)
+- **Upload Speed WAN** (Mbit/s)  
+- **Ping WAN** (ms)
+
+**Secondary WAN Device** (e.g., "HA Unifi Speedtest Secondary WAN [WAN2 - eth8]"):
+- **Download Speed WAN2** (Mbit/s)
+- **Upload Speed WAN2** (Mbit/s)  
+- **Ping WAN2** (ms)
+
+**Additional WANs** (WAN3, WAN4, etc.) follow the same pattern.
+
 ### Single WAN Setup
-The integration creates three sensors for monitoring network performance:
+For single WAN setups or self-hosted controllers, sensors use clean naming:
 
 - **UniFi Speed Test Download Speed** (Mbit/s)
 - **UniFi Speed Test Upload Speed** (Mbit/s)  
 - **UniFi Speed Test Ping** (ms)
 
-### 🆕 Dual WAN Setup
-For multi-WAN configurations, separate sensors are created for each WAN interface:
-
-**WAN 1:**
-- **UniFi Speed Test Download Speed WAN** (Mbit/s)
-- **UniFi Speed Test Upload Speed WAN** (Mbit/s)  
-- **UniFi Speed Test Ping WAN** (ms)
-
-**WAN 2:**
-- **UniFi Speed Test Download Speed WAN2** (Mbit/s)
-- **UniFi Speed Test Upload Speed WAN2** (Mbit/s)  
-- **UniFi Speed Test Ping WAN2** (ms)
-
-### Additional Sensors
-- **UniFi Speed Test Runs**: Track total number of speed tests performed
-- **UniFi API Health**: Monitor integration connection status
+### Common Sensors (All Setups)
+- **Speed Test Runs**: Track total number of speed tests performed
+- **API Health**: Monitor integration connection status and rate limiting
 
 ### 🏷️ Sensor Attributes
 
-Each multi-WAN sensor includes additional attributes:
-- `interface_name`: Physical interface (e.g., "eth9", "eth10")
+Each multi-WAN sensor includes detailed attributes:
+- `interface_name`: Physical interface (e.g., "eth9", "eth8")
 - `wan_networkgroup`: WAN group name (e.g., "WAN", "WAN2")
 - `wan_number`: Sequential WAN number
 - `total_wan_interfaces`: Total detected WAN interfaces
-- `is_primary_wan`: Boolean indicating primary WAN (intelligently determined from routing/config)
+- `is_primary_wan`: Boolean indicating primary WAN (based on routing configuration)
 - `timestamp`: Last speedtest timestamp
-- `status`: Interface status
+- `status`: Current interface status (up/down)
+- `ip_address`: WAN IP address
+- `gateway`: Gateway IP address
 
-**Note on `is_primary_wan`**: This attribute now reflects the **actual** primary WAN as configured in your UniFi controller, not just the first physical port detected. If you've configured a secondary port (like SFP+ port 2) as your primary WAN, that interface will correctly show `is_primary_wan: true`.
+**Note on `is_primary_wan`**: Reflects the **actual** primary WAN as configured in your UniFi controller routing table, not just physical port order.
 
-## 🔧 Services
+## 🔧 Services & Buttons
 
-### `ha_unifi_speedtest.start_speed_test`
+### Button Entities
+
+The integration creates button entities for triggering speed tests:
+
+**All WANs Button:**
+- **HA Unifi Speedtest Run Speedtest (All WANs)** - Triggers speed test on all WAN interfaces
+
+**Per-WAN Buttons** (created dynamically for each active WAN):
+- **HA Unifi Speedtest Run Speedtest (WAN - eth9)** - Trigger test on specific WAN
+- **HA Unifi Speedtest Run Speedtest (WAN2 - eth8)** - Trigger test on specific WAN
+- etc.
+
+### Services
+
+#### `ha_unifi_speedtest.start_speed_test`
 
 Initiates a speed test on your UniFi network.
 
-**Note**: Only available for traditional UniFi Controller software. UDM Pro users must start speed tests manually via the UniFi Network web interface.
+**Parameters:**
+- `config_entry_id` (optional): Specific integration instance
+- `interface_name` (optional): Specific WAN interface to test
 
-#### Example Usage:
+#### `ha_unifi_speedtest.get_speed_test_status`
+
+Manually refreshes speed test data from your UniFi controller.
+
+**Parameters:**
+- `config_entry_id` (optional): Specific integration instance
+
+### Example Usage:
 
 **In Automations:**
 ```yaml
 action:
   - service: ha_unifi_speedtest.start_speed_test
+    data:
+      interface_name: "eth9"  # Optional: test specific interface
 ```
 
 **In Scripts:**
@@ -199,24 +259,51 @@ test_network_speed:
     - delay: "00:02:00"  # Wait for test to complete
     - service: notify.mobile_app
       data:
-        message: "Speed test completed. Download: {{ states('sensor.unifi_speed_test_download_speed') }} Mbps"
+        message: "Speed test completed. Download: {{ states('sensor.download_speed_wan') }} Mbps"
 ```
 
-**Lovelace Button:**
+**Lovelace Button Card:**
 ```yaml
 type: button
 name: Start Speed Test
+icon: mdi:speedometer
 tap_action:
   action: call-service
   service: ha_unifi_speedtest.start_speed_test
 ```
 
-### `ha_unifi_speedtest.get_speed_test_status`
-
-Manually refreshes speed test data from your UniFi controller.
-
 ## 📊 Example Dashboard
 
+**Multi-WAN Dashboard:**
+```yaml
+type: vertical-stack
+cards:
+  - type: entities
+    title: Primary WAN (eth9)
+    entities:
+      - entity: sensor.download_speed_wan
+        name: Download Speed
+      - entity: sensor.upload_speed_wan
+        name: Upload Speed
+      - entity: sensor.ping_wan
+        name: Ping
+      - entity: button.ha_unifi_speedtest_run_speedtest_wan_eth9
+        name: Run Speed Test
+  
+  - type: entities
+    title: Secondary WAN (eth8)
+    entities:
+      - entity: sensor.download_speed_wan2
+        name: Download Speed
+      - entity: sensor.upload_speed_wan2
+        name: Upload Speed
+      - entity: sensor.ping_wan2
+        name: Ping
+      - entity: button.ha_unifi_speedtest_run_speedtest_wan2_eth8
+        name: Run Speed Test
+```
+
+**Single WAN Dashboard:**
 ```yaml
 type: entities
 title: Network Speed Test
@@ -227,143 +314,119 @@ entities:
     name: Upload Speed
   - entity: sensor.unifi_speed_test_ping
     name: Ping
+  - entity: button.ha_unifi_speedtest_run_speedtest_all_wans
+    name: Run Speed Test
 ```
 
-# HA UniFi Speedtest v2.0.1 - Update Notes
+## 📦 What's New
 
-## 🆕 What's New in v2.1.1 (Latest)
-### 🐛 **Bug Fixes**
-- **UDM Pro Compatibility**: Fixed 404 errors on UDM Pro devices that don't support advanced routing endpoints
-- **Graceful Fallback**: Integration now automatically detects unsupported UDM routing endpoints and switches to controller mode
-- **Cleaner Logs**: Eliminated repetitive 404 error messages during setup
-- **Improved Stability**: Better error handling prevents integration setup failures
+### v3.0.0 (Current) - November 2, 2025
+**Breaking Changes:**
+- Authentication switched to API Key for UDM/UniFi OS, username/password for self-hosted
+- Two-step configuration flow (controller type → credentials)
+- Sensor naming updated for multi-WAN setups
 
-## 🆕 What's New in v2.1.0
-### ✅ **Intelligent Primary WAN Detection** 
-- **Smart Primary WAN Detection**: Now properly identifies the primary WAN interface based on routing tables and network configuration
-- **Resolves Dual WAN Issues**: Fixes issues where secondary physical ports configured as primary WAN showed incorrect "is_primary_wan" status  
-- **Multiple Detection Methods**: Uses routing table analysis, network configuration, and speed test data to determine the true primary WAN
-- **Smart Device Naming**: Automatically names devices and sensors as "Primary WAN" and "Secondary WAN" for clarity
-- **Backward Compatible**: Falls back to previous behavior if advanced detection fails
+**New Features:**
+- Separated API architecture (hardware/software/base/factory pattern)
+- Official UniFi API endpoints throughout
+- Button platform for triggering speed tests
+- Faster UI updates with automatic post-test refreshes
+- Optional "Show Inactive WANs" setting
+- Separate devices per WAN interface
 
-### ✅ **Enhanced User Experience**
-- **Clear Device Names**: Devices now show as "Primary WAN" and "Secondary WAN" instead of "WAN" and "WAN2"
-- **Improved Sensor Names**: Sensors clearly indicate which is primary vs secondary
-- **Better Attributes**: Enhanced sensor attributes show primary WAN status and interface details
+**See [CHANGELOG.md](CHANGELOG.md) for complete details.**
 
-## 🆕 What's New in v2.2.0
-
-### ✅ **User-Controlled Controller Type Selection**
-- **No More Auto-Detection**: Eliminated confusing automatic controller detection that could misidentify your setup
-- **Clear Controller Options**: Choose between "UDM Pro/SE/Cloud Key Gen2+" or "Self-hosted Controller"  
-- **Reliable Endpoint Selection**: Always uses the correct API endpoints for your controller type
-- **Fixed Authentication Issues**: Resolved 401/404 errors caused by incorrect endpoint detection
-
-### ✅ **Intelligent WAN Interface Management**
-- **UDM Multi-WAN Logic**: UDM controllers automatically check for multiple WAN connections
-- **Connection-Based Entity Creation**: Only creates entities for actually connected WAN interfaces
-- **Clean Single WAN Naming**: When only one WAN is connected, gets clean names like "Download Speed" instead of "Download Speed WAN1"
-- **Traditional Controller Single WAN**: Self-hosted controllers use single WAN mode with appropriate endpoints
-
-### ✅ **Enhanced User Experience**  
-- **Eliminated Unknown Entities**: No more persistent "Unknown" entities that couldn't be removed
-- **Better Configuration UI**: Clear descriptions help you choose the right controller type
-- **Improved Error Messages**: More helpful messages when no speedtest data is available
-- **Predictable Behavior**: Integration behaves consistently based on your controller type selection
-
-### ✅ **Previous Updates (v1.4.0)**
-- **Added Poll Control**: Configurable poll interval
-- **Fixed Compatibility Issues**: Resolved UDM and Software-based controller issues
-- **Adjusted Initial Run Time**: Corrected initial run timing for software controllers
-- **Manual Speed Test Button**: Added on-demand speed test capability
-
-### ✅ **Manual Speed Test Button**
-Add this button to your dashboard for on-demand speed tests:
-
-```yaml
-show_name: true
-show_icon: true
-type: button
-name: Start Speed Test
-icon: mdi:speedometer
-tap_action:
-  action: call-service
-  service: ha_unifi_speedtest.start_speed_test
-```
-
-## 📊 Available Sensors
-
-- **UniFi Speed Test Download Speed** - Download speed in `Mbit/s`
-- **UniFi Speed Test Upload Speed** - Upload speed in `Mbit/s`  
-- **UniFi Speed Test Ping** - Latency in `ms`
-
-## 🔧 Compatibility
-
-- ✅ **UDM Pro / UDM SE / Cloud Key** - Full support with automatic speed test triggering
-- ✅ **Traditional UniFi Controller Software** - Full support
-- ✅ **Both controller types** get fresh speed test data every hour automatically
-
-## 🚀 Quick Setup
-
-1. **Install Integration**: Add via HACS or copy files to `custom_components/ha_unifi_speedtest/`
-2. **Configure**: Settings → Devices & Services → Add Integration → "HA Unifi Speedtest"
-3. **Enter Details**: Your UniFi controller URL, username, password, and controller type
-4. **Done!**: Sensors will appear automatically with hourly speed tests
-
----
-
-*The integration now works seamlessly with both UDM Pro and traditional UniFi Controllers, providing regular speed test data with proper Home Assistant unit standards.*
+### Previous Versions
+- **v2.2.0** - User-controlled controller type selection
+- **v2.1.1** - UDM Pro 404 error fixes
+- **v2.1.0** - Intelligent primary WAN detection
+- **v2.0.1** - Initial multi-WAN support
 
 ## 🔧 Troubleshooting
 
 ### Common Issues
 
-**403 Forbidden Error**: 
-- Verify your username/password are correct
-- Ensure the user account has admin privileges
-- For UDM Pro: Disable 2FA temporarily or create a local admin user
+**Invalid Authentication Error**: 
+- **UDM/UniFi OS**: Verify your API key is correct and hasn't expired
+  - Generate a new API key if needed: Settings → Admins → [Your Admin] → API Key
+- **Self-hosted**: Verify username/password are correct
+  - Ensure the user account has admin privileges
+  - Check if 2FA is enabled (may need to disable or use local admin)
 
-**Connection Refused**:
-- Check the URL format matches your controller type
+**Cannot Connect**:
+- Check the URL format:
+  - UDM/UniFi OS: `https://192.168.1.1` (no port)
+  - Self-hosted: `https://192.168.1.10:8443` (usually port 8443)
 - Verify the controller is accessible from Home Assistant
-- Check firewall settings
+- Check firewall settings allow connections
+- Try disabling "Verify SSL" if using self-signed certificates
 
-**No Speed Test Data**:
+**No Speed Test Data / No Sensors Appear**:
 - Ensure at least one speed test has been run on your controller
-- Traditional controllers: Use the `start_speed_test` service
-- UDM Pro: Run a speed test via the web interface first
+- For multi-WAN: Sensors appear dynamically after speed test data exists
+- Use the "Run Speedtest (All WANs)" button to seed initial data
+- Check that WANs are active (have link and IP address)
+- Enable "Show Inactive WANs" in options if you want to see all WANs
 
-### Primary WAN Detection Issues
+**Only One WAN Showing (Expected Multiple)**:
+- Verify multi-WAN is enabled in integration options
+- Check that multiple WANs are configured in UniFi controller
+- Ensure WANs are active (connected with IP addresses)
+- Run a manual speed test to trigger entity creation
+- Check Developer Tools → States for all `sensor.*wan*` entities
 
-The integration now uses **intelligent primary WAN detection** to properly identify which WAN interface is actually your primary connection, even if you've configured a secondary port (like SFP+ port 2) as your primary WAN.
+### API Key Issues (UDM/UniFi OS)
+
+**API Key Not Working:**
+1. Verify you're using the correct controller type (UDM/UniFi OS, not Self-hosted)
+2. Ensure the API key was copied completely (no spaces or truncation)
+3. Check the API key hasn't been revoked in the controller
+4. Try generating a new API key
+
+**Where to Find API Key:**
+- Settings → Admins → [Your Admin Account] → API Key section → "Create New API Key"
+- Save the key immediately - you can't view it again after creation
+
+### Multi-WAN Detection Issues
 
 **Primary WAN Detection Methods** (in order of priority):
-1. **Routing Table Analysis**: Checks the default route (0.0.0.0/0) to identify which interface handles the primary traffic
-2. **Network Configuration**: Looks for explicitly configured primary WAN settings in the UniFi controller
-3. **Speed Test Data**: Uses the WAN interface with the most recent and complete speed test data
-4. **Fallback**: Uses the first detected interface (legacy behavior)
+1. **Routing Table Analysis**: Checks the default route (0.0.0.0/0)
+2. **WAN Group Priority**: "WAN" group is preferred as primary
+3. **Network Configuration**: Looks for explicit primary WAN settings
+4. **Speed Test Data**: Uses most recent and complete data
+5. **Fallback**: First detected interface
 
 **If Primary WAN Detection is Incorrect**:
 
 1. **Check UniFi Network Settings**: 
-   - Verify that your desired primary WAN is correctly configured in the UniFi Network application
-   - Ensure the routing table reflects your intended primary WAN
+   - Verify routing configuration in UniFi Network application
+   - Ensure the desired primary WAN has the default route
 
-2. **Check Integration Logs**:
-   - Enable debug logging (see below)
-   - Look for messages like: "Primary WAN determined from routing table: eth9_WAN"
-   - The logs will show which detection method was used
+2. **Check Integration Logs** (enable debug logging below):
+   - Look for: "Primary WAN determined from routing table: eth9_WAN"
+   - Shows which detection method was used
 
 3. **Check Sensor Attributes**:
-   - Go to Developer Tools > States
-   - Find your UniFi speed test sensors
-   - Check if `is_primary_wan` is correct on your configured primary WAN
+   - Developer Tools → States → Find your speed test sensors
+   - Verify `is_primary_wan: true` on correct interface
 
 **Expected Behavior**:
-- The WAN interface you've configured as primary in UniFi should show `is_primary_wan: true`
-- That interface should have the speed test results
-- Other WAN interfaces should show `is_primary_wan: false`
-- Devices and sensors will be named "Primary WAN" and "Secondary WAN"
+- Interface configured as primary in UniFi shows `is_primary_wan: true`
+- Devices named "Primary WAN [WAN - eth9]" and "Secondary WAN [WAN2 - eth8]"
+- Each WAN gets separate device with its own sensors
+
+### Integration Not Loading
+
+**Check for Errors:**
+```bash
+# View Home Assistant logs
+docker logs homeassistant | grep ha_unifi_speedtest
+```
+
+**Common Causes:**
+- Missing required files (ensure all .py files are present)
+- Python import errors (check file permissions)
+- Configuration issues (try removing and re-adding integration)
 
 ### Debug Logging
 
@@ -387,6 +450,10 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## ⚖ Disclaimer
 
 This integration is not affiliated with Ubiquiti Inc. or UI.com. All product names, logos, and brands are property of their respective owners.
+
+## 🙏 Acknowledgments
+
+- **Icon Design**: Thanks to [@esand](https://github.com/esand) for creating the integration icon!
 
 [releases-shield]: https://img.shields.io/github/release/tfam/ha_unifi_speedtest.svg
 [releases]: https://github.com/tfam/ha_unifi_speedtest/releases
