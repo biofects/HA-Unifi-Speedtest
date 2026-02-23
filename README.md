@@ -2,6 +2,7 @@
 
 
 # 🌐 UniFi Speedtest for Home Assistant
+# I will be pushing updates soon, sorry all i have been away for a while
 
 ## 🔍 About
 
