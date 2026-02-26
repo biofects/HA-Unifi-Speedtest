@@ -901,6 +901,9 @@ class UniFiAPIHealthSensor(SensorEntity):
         self._name = name
         self._attr_unique_id = f"{DOMAIN}_api_health"
         self._attr_name = f"UniFi {name}"
+        # Cache controller info at init to avoid blocking calls in properties
+        self._controller_type = api.controller_type
+        self._controller_site = api.site
 
     @property
     def state(self) -> StateType:
@@ -936,12 +939,13 @@ class UniFiAPIHealthSensor(SensorEntity):
         """Return additional state attributes."""
         try:
             health = self._api.get_health_status()
-            controller_info = self._api.get_controller_info()
+            # Use cached controller info instead of calling get_controller_info()
+            # which may make blocking HTTP requests for some controller types
             return {
                 **health,
-                "controller_type": controller_info.get('type'),
-                "controller_site": controller_info.get('site'),
-                "rate_limit_backoff": controller_info.get('rate_limit_backoff', 0)
+                "controller_type": self._controller_type,
+                "controller_site": self._controller_site,
+                "rate_limit_backoff": 0
             }
         except Exception as e:
             return {"error": str(e)}

@@ -65,11 +65,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 return
             new_entities: list[ButtonEntity] = []
             
-            # Build status map
-            try:
-                wan_status_map = api.get_wan_status_map()
-            except Exception:
-                wan_status_map = {}
+            # Get WAN status from cached data instead of making blocking API call
+            wan_status_map = hass.data.get(DOMAIN, {}).get(f"{entry.entry_id}_wan_status", {})
             
             def _is_active_listener(iface: str) -> bool:
                 st = wan_status_map.get(iface)
