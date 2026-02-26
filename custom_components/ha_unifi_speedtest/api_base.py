@@ -7,6 +7,8 @@ import requests
 import urllib3
 from requests import Response
 from requests.exceptions import HTTPError, RequestException, Timeout
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -30,11 +32,26 @@ class UniFiAPIBase:
         self.controller_type = controller_type
         self.enable_multi_wan = enable_multi_wan
 
+        # Create session with retry strategy and proper SSL handling
         self.session = requests.Session()
         self.session.headers.update({
             "User-Agent": "HomeAssistant-UniFi-Speedtest/3.x",
             "Accept": "application/json, text/plain, */*",
         })
+        
+        # Configure adapter with retry logic for both HTTP and HTTPS
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["HEAD", "GET", "POST", "PUT", "DELETE", "OPTIONS", "TRACE"]
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
+        
+        # Set verify globally on session for consistency
+        self.session.verify = verify_ssl
 
         # Cached site UUID for integration endpoints
         self._site_id: Optional[str] = None
@@ -56,7 +73,8 @@ class UniFiAPIBase:
         url = f"{self.url}{path}"
         try:
             # This blocking call is intentional - called via executor job
-            resp = method(url, json=json, params=params, verify=self.verify_ssl, timeout=timeout)
+            # verify is already set on session, no need to pass explicitly
+            resp = method(url, json=json, params=params, timeout=timeout)
             resp.raise_for_status()
             return resp
         except HTTPError as e:

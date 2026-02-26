@@ -52,10 +52,10 @@ class UniFiSoftwareAPI(UniFiAPIBase):
         }
 
         try:
+            # verify is already set on session
             resp = self.session.post(
                 f"{self.url}{login_path}",
                 json=login_data,
-                verify=self.verify_ssl,
                 timeout=(10, 30)
             )
             resp.raise_for_status()
