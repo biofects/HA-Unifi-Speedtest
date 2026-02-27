@@ -27,7 +27,7 @@
       },
       "error": {
         "cannot_connect": "Cannot connect to the UniFi Controller. Please check the URL and credentials.",
-        "invalid_auth": "Invalid username or password. Please try again.",
+        "invalid_auth": "Authentication failed. For self-hosted controllers, verify username/password. For UDM/UniFi OS, verify API key.",
         "access_denied": "Access denied. This may be due to rate limiting or incorrect permissions. Try increasing intervals or check credentials.",
         "timeout": "Connection timeout. Check if the controller is accessible and responsive.",
         "unknown_error": "Unexpected error occurred. Please check logs for details.",
