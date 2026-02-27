@@ -44,7 +44,7 @@ class UniFiSoftwareAPI(UniFiAPIBase):
 
         _LOGGER.info("Logging in to software controller with username/password")
         
-        login_path = "/api/auth/login"
+        login_path = "/api/login"
         login_data = {
             "username": self.username,
             "password": self.password,
