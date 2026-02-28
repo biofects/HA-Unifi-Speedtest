@@ -149,43 +149,85 @@ class UniFiSoftwareAPI(UniFiAPIBase):
         self.login()
         
         site_internal, _ = self._resolve_site_ids()
-        path = f"/api/s/{site_internal}/stat/speedtest"
         
-        try:
-            resp = self._request(self.session.get, path)
-            data = resp.json() or {}
-        except Exception as e:
-            _LOGGER.error(f"Failed to get speedtest status: {e}")
+        # Try multiple endpoints - health first (more widely supported), then speedtest
+        endpoints_to_try = [
+            (f"/api/s/{site_internal}/stat/health", "health"),
+            (f"/api/s/{site_internal}/stat/speedtest", "speedtest"),
+        ]
+        
+        wan_data = None
+        
+        for path, endpoint_type in endpoints_to_try:
+            try:
+                _LOGGER.debug(f"Trying endpoint: {path}")
+                resp = self._request(self.session.get, path)
+                data = resp.json() or {}
+                
+                if endpoint_type == "health":
+                    # Parse health endpoint - find www subsystem
+                    subsystems = data.get("data", [])
+                    www_data = None
+                    for subsystem in subsystems:
+                        if subsystem.get("subsystem") == "www":
+                            www_data = subsystem
+                            break
+                    
+                    if www_data:
+                        # Extract speedtest data from www subsystem
+                        timestamp_s = www_data.get("speedtest_lastrun")
+                        timestamp_ms = timestamp_s * 1000 if timestamp_s else None
+                        
+                        wan_data = {
+                            "interface_name": "wan",
+                            "wan_networkgroup": "WAN",
+                            "download": self._safe_float(www_data.get("xput_down")),
+                            "upload": self._safe_float(www_data.get("xput_up")),
+                            "ping": self._safe_float(www_data.get("speedtest_ping")),
+                            "timestamp": self._format_timestamp(timestamp_ms),
+                            "status": www_data.get("speedtest_status", "unknown").lower(),
+                            "id": str(timestamp_s) if timestamp_s else None,
+                        }
+                        _LOGGER.debug(f"Successfully parsed health endpoint: {wan_data}")
+                        break
+                    else:
+                        _LOGGER.debug("No www subsystem found in health data")
+                        continue
+                        
+                else:  # speedtest endpoint
+                    tests = data.get("data", [])
+                    if tests:
+                        # Get most recent test
+                        latest = max(tests, key=lambda x: x.get("_id", ""))
+                        
+                        wan_data = {
+                            "interface_name": "wan",
+                            "wan_networkgroup": "WAN",
+                            "download": self._safe_float(latest.get("xput_download") or latest.get("xput_down")),
+                            "upload": self._safe_float(latest.get("xput_upload") or latest.get("xput_up")),
+                            "ping": self._safe_float(latest.get("latency") or latest.get("speedtest_ping")),
+                            "timestamp": self._format_timestamp(latest.get("timestamp")),
+                            "status": "completed",
+                            "id": latest.get("_id"),
+                        }
+                        _LOGGER.debug(f"Successfully parsed speedtest endpoint: {wan_data}")
+                        break
+                    else:
+                        _LOGGER.debug("No speedtest data found in speedtest endpoint")
+                        continue
+                        
+            except Exception as e:
+                _LOGGER.debug(f"Failed to get data from {path}: {e}")
+                continue
+        
+        if not wan_data:
+            _LOGGER.warning("No speedtest data found from any endpoint")
             return {
                 "wan_interfaces": [],
                 "total_interfaces": 0,
                 "primary_wan": None,
                 "multi_wan_enabled": False,
             }
-        
-        tests = data.get("data", [])
-        if not tests:
-            return {
-                "wan_interfaces": [],
-                "total_interfaces": 0,
-                "primary_wan": None,
-                "multi_wan_enabled": False,
-            }
-        
-        # Get most recent test
-        latest = max(tests, key=lambda x: x.get("_id", ""))
-        
-        # Format as single WAN result
-        wan_data = {
-            "interface_name": "wan",
-            "wan_networkgroup": "WAN",
-            "download": self._safe_float(latest.get("xput_download")),
-            "upload": self._safe_float(latest.get("xput_upload")),
-            "ping": self._safe_float(latest.get("latency")),
-            "timestamp": self._format_timestamp(latest.get("timestamp")),
-            "status": "completed",
-            "id": latest.get("_id"),
-        }
         
         return {
             "wan_interfaces": [wan_data],
@@ -193,7 +235,7 @@ class UniFiSoftwareAPI(UniFiAPIBase):
             "primary_wan": "wan_WAN",
             "multi_wan_enabled": False,
             "platform_type": "controller",
-            "detection_method": "legacy_speedtest_api",
+            "detection_method": "legacy_health_api",
         }
 
     def get_wan_status_map(self) -> Dict[str, Dict[str, Any]]:
@@ -242,8 +284,16 @@ class UniFiSoftwareAPI(UniFiAPIBase):
         try:
             self.login()
             site_internal, _ = self._resolve_site_ids()
-            _ = self._request(self.session.get, f"/api/s/{site_internal}/stat/speedtest")
-            return True
+            # Use stat/health endpoint which is more widely supported
+            resp = self._request(self.session.get, f"/api/s/{site_internal}/stat/health")
+            data = resp.json()
+            # Verify we got valid data back
+            if "data" in data:
+                _LOGGER.info("Connection test successful")
+                return True
+            else:
+                _LOGGER.warning("Connection test returned unexpected data format")
+                return False
         except Exception as e:
             _LOGGER.error(f"Connection test failed: {e}")
             return False
