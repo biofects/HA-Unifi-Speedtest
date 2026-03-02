@@ -578,7 +578,10 @@ class UniFiSpeedTestSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def state(self) -> StateType:
-        value = self.coordinator.data.get(self._data_key) if self.coordinator.data else None
+        data = self.coordinator.data or {}
+        interfaces = data.get("wan_interfaces", [])
+
+        value = interfaces[0].get(self._data_key) if interfaces else data.get(self._data_key)
         _LOGGER.debug(f"Getting state for {self._name}: {value}")
         return value
 

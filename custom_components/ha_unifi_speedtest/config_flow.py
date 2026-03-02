@@ -143,13 +143,22 @@ class UniFiSpeedTestConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 
             except Exception as e:
                 _LOGGER.error(f"Configuration validation failed: {e}")
-                if "403" in str(e) or "forbidden" in str(e).lower():
-                    errors["base"] = "access_denied"
-                elif "401" in str(e) or "unauthorized" in str(e).lower():
+                error_str = str(e).lower()
+                
+                # Check for credential-related errors
+                if "api key is required" in error_str or "api_key" in error_str:
                     errors["base"] = "invalid_auth"
-                elif "timeout" in str(e).lower():
+                    _LOGGER.error("API key required for UDM/UniFi OS controllers. Self-hosted controllers should use username/password.")
+                elif "username and password" in error_str:
+                    errors["base"] = "invalid_auth"
+                    _LOGGER.error("Username and password required for self-hosted software controllers.")
+                elif "403" in str(e) or "forbidden" in error_str:
+                    errors["base"] = "access_denied"
+                elif "401" in str(e) or "unauthorized" in error_str:
+                    errors["base"] = "invalid_auth"
+                elif "timeout" in error_str:
                     errors["base"] = "timeout"
-                elif "connect" in str(e).lower():
+                elif "connect" in error_str:
                     errors["base"] = "cannot_connect"
                 else:
                     errors["base"] = "unknown_error"

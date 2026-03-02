@@ -33,10 +33,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     enable_multi_wan = entry.options.get(CONF_ENABLE_MULTI_WAN, 
                                         entry.data.get(CONF_ENABLE_MULTI_WAN, True))
     
-    controller_type = entry.data.get(CONF_CONTROLLER_TYPE, "udm")
+    # Detect controller type from saved config or infer from available credentials
+    controller_type = entry.data.get(CONF_CONTROLLER_TYPE)
+    if not controller_type:
+        # Auto-detect based on which credentials are available
+        if CONF_API_KEY in entry.data:
+            controller_type = "udm"
+            _LOGGER.info("Controller type not set, detected 'udm' from API key presence")
+        elif CONF_USERNAME in entry.data and CONF_PASSWORD in entry.data:
+            controller_type = "controller"
+            _LOGGER.info("Controller type not set, detected 'controller' from username/password presence")
+        else:
+            # Fallback to controller (self-hosted) as it's more common
+            controller_type = "controller"
+            _LOGGER.warning("Controller type not set and credentials ambiguous, defaulting to 'controller'")
     
     # Prepare credentials based on controller type
     if controller_type == "udm":
+        if CONF_API_KEY not in entry.data:
+            _LOGGER.error("Controller type is 'udm' but API key is missing from configuration")
+            return False
         api = create_unifi_api(
             url=entry.data[CONF_URL],
             controller_type=controller_type,
@@ -46,6 +62,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             enable_multi_wan=enable_multi_wan
         )
     else:  # software controller
+        if CONF_USERNAME not in entry.data or CONF_PASSWORD not in entry.data:
+            _LOGGER.error("Controller type is 'controller' but username/password is missing from configuration")
+            return False
         api = create_unifi_api(
             url=entry.data[CONF_URL],
             controller_type=controller_type,
@@ -60,7 +79,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Optionally test the connection once during setup
     ok = await hass.async_add_executor_job(api.test_connection)
     if not ok:
-        _LOGGER.error("Failed to validate connection to UniFi controller with provided API key")
+        if controller_type == "udm":
+            _LOGGER.error("Failed to validate connection to UniFi controller with provided API key")
+        else:
+            _LOGGER.error("Failed to validate connection to UniFi controller with provided username/password")
         # We still proceed; sensors will show unavailable until corrected
 
     # Store the API instance
