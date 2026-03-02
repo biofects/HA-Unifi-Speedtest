@@ -454,6 +454,7 @@ This integration is not affiliated with Ubiquiti Inc. or UI.com. All product nam
 ## 🙏 Acknowledgments
 
 - **Icon Design**: Thanks to [@esand](https://github.com/esand) for creating the integration icon!
+- **Special Thanks**: Huge shout out to [@esand](https://github.com/esand) for their invaluable help in troubleshooting and getting the integration working!
 
 [releases-shield]: https://img.shields.io/github/release/tfam/ha_unifi_speedtest.svg
 [releases]: https://github.com/tfam/ha_unifi_speedtest/releases
