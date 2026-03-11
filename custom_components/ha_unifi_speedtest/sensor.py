@@ -229,43 +229,49 @@ async def async_setup_entry(
     hass.data[DOMAIN][f"{config_entry.entry_id}_created_wans"] = created_wan_keys
 
     # Clean up entities that shouldn't exist based on current configuration
+    # IMPORTANT: Only do this if we have data, otherwise we'll create zombie entities
     from homeassistant.helpers import entity_registry as er
     entity_reg = er.async_get(hass)
     
     # Get all entities for this integration
     entities = er.async_entries_for_config_entry(entity_reg, config_entry.entry_id)
     
-    # Determine which WAN interfaces should exist
-    should_exist_wans = set()
-    if coordinator.data and isinstance(coordinator.data, dict) and coordinator.data.get('wan_interfaces'):
-        for wan in coordinator.data['wan_interfaces']:
-            interface_name = wan.get('interface_name') or wan.get('interface')
-            if interface_name:
-                # Check if this WAN should have entities based on show_inactive_wans setting
-                if show_inactive_wans:
-                    should_exist_wans.add(interface_name)
-                else:
-                    # Only include if it has actual speedtest data
-                    download = wan.get('download')
-                    upload = wan.get('upload')
-                    if (download is not None and download > 0) or (upload is not None and upload > 0):
+    # Only cleanup if we have coordinator data to work with
+    # If data isn't available yet, skip cleanup to avoid removing valid entities
+    if coordinator.data and isinstance(coordinator.data, dict):
+        # Determine which WAN interfaces should exist
+        should_exist_wans = set()
+        if coordinator.data.get('wan_interfaces'):
+            for wan in coordinator.data['wan_interfaces']:
+                interface_name = wan.get('interface_name') or wan.get('interface')
+                if interface_name:
+                    # Check if this WAN should have entities based on show_inactive_wans setting
+                    if show_inactive_wans:
                         should_exist_wans.add(interface_name)
-    
-    _LOGGER.info(f"WANs that should exist: {should_exist_wans}")
-    
-    # Remove entities for WANs that shouldn't exist
-    for entity in entities:
-        # Check if this is a WAN-specific entity (has eth in unique_id)
-        if entity.platform == "sensor" and "_eth" in entity.unique_id:
-            # Extract interface name from unique_id (format: ha_unifi_speedtest_download_eth9_WAN)
-            parts = entity.unique_id.split("_")
-            for i, part in enumerate(parts):
-                if part.startswith("eth"):
-                    interface_name = part
-                    if interface_name not in should_exist_wans:
-                        _LOGGER.debug(f"Removing entity {entity.entity_id} for inactive WAN {interface_name}")
-                        entity_reg.async_remove(entity.entity_id)
-                    break
+                    else:
+                        # Only include if it has actual speedtest data
+                        download = wan.get('download')
+                        upload = wan.get('upload')
+                        if (download is not None and download > 0) or (upload is not None and upload > 0):
+                            should_exist_wans.add(interface_name)
+        
+        _LOGGER.info(f"WANs that should exist: {should_exist_wans}")
+        
+        # Remove entities for WANs that shouldn't exist
+        for entity in entities:
+            # Check if this is a WAN-specific entity (has eth in unique_id)
+            if entity.platform == "sensor" and "_eth" in entity.unique_id:
+                # Extract interface name from unique_id (format: ha_unifi_speedtest_download_eth9_WAN)
+                parts = entity.unique_id.split("_")
+                for i, part in enumerate(parts):
+                    if part.startswith("eth"):
+                        interface_name = part
+                        if interface_name not in should_exist_wans:
+                            _LOGGER.debug(f"Removing entity {entity.entity_id} for inactive WAN {interface_name}")
+                            entity_reg.async_remove(entity.entity_id)
+                        break
+    else:
+        _LOGGER.debug("Skipping entity cleanup - no coordinator data available yet (will cleanup on next update)")
 
     # Helper to build a canonical WAN key
     def _wan_key(interface_name: str, wan_group: str) -> str:

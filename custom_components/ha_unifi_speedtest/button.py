@@ -29,12 +29,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     created_keys: set[str] = set()
 
     if enable_multi_wan and coordinator and coordinator.data and isinstance(coordinator.data, dict):
-        # Build status map to check which WANs are active
-        try:
-            wan_status_map = await hass.async_add_executor_job(api.get_wan_status_map)
-        except Exception as e:
-            _LOGGER.debug(f"Could not get WAN status map: {e}")
-            wan_status_map = {}
+        # Get cached WAN status map to avoid blocking call
+        wan_status_map = hass.data.get(DOMAIN, {}).get(f"{entry.entry_id}_wan_status", {})
+        
+        # If not cached yet, fetch in background without blocking
+        if not wan_status_map:
+            async def _fetch_wan_status():
+                try:
+                    status_map = await hass.async_add_executor_job(api.get_wan_status_map)
+                    hass.data[DOMAIN][f"{entry.entry_id}_wan_status"] = status_map
+                except Exception as e:
+                    _LOGGER.debug(f"Could not get WAN status map: {e}")
+            hass.async_create_task(_fetch_wan_status())
 
         def _is_active(iface: str) -> bool:
             """Check if WAN interface is active."""
