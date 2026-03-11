@@ -220,8 +220,9 @@ async def async_setup_entry(
         _LOGGER.info(f"Automatic speed test scheduling disabled for {api.controller_type} controller")
         _LOGGER.info(f"Data will be polled every {polling_interval} minutes")
 
-    _LOGGER.info("Coordinator created, refreshing config entry.")
-    await coordinator.async_config_entry_first_refresh()
+    # Request initial refresh in background without blocking startup
+    _LOGGER.info("Coordinator created, scheduling initial data refresh.")
+    hass.async_create_task(coordinator.async_refresh())
 
     # Track created WAN sensor keys to avoid duplicates and enable dynamic additions
     created_wan_keys: set[str] = set()
@@ -277,17 +278,23 @@ async def async_setup_entry(
     if api.controller_type == 'udm' and enable_multi_wan:
         _LOGGER.info("UDM controller detected with Multi-WAN enabled - sensors will appear after first speed test")
 
-        # Build status map to filter offline/unassigned WANs and store in hass.data
-        try:
-            wan_status_map = await hass.async_add_executor_job(api.get_wan_status_map)
-            hass.data[DOMAIN][f"{config_entry.entry_id}_wan_status"] = wan_status_map
-            _LOGGER.debug(f"WAN status map fetched: {wan_status_map}")
-            for iface, status in wan_status_map.items():
-                _LOGGER.debug(f"  Interface {iface}: up={status.get('up')}, ip={status.get('ip')}, speed={status.get('speed')}, rx_bytes={status.get('rx_bytes')}, tx_bytes={status.get('tx_bytes')}, is_active={status.get('is_active')}")
-        except Exception as e:
-            _LOGGER.debug(f"Failed to get WAN status map: {e}")
-            wan_status_map = {}
-            hass.data[DOMAIN][f"{config_entry.entry_id}_wan_status"] = {}
+        # Initialize empty WAN status map, will be populated by coordinator updates
+        wan_status_map = {}
+        hass.data[DOMAIN][f"{config_entry.entry_id}_wan_status"] = {}
+        
+        # Fetch WAN status in background to avoid blocking startup
+        async def _fetch_wan_status_background():
+            """Fetch WAN status map in background."""
+            try:
+                wan_status_map = await hass.async_add_executor_job(api.get_wan_status_map)
+                hass.data[DOMAIN][f"{config_entry.entry_id}_wan_status"] = wan_status_map
+                _LOGGER.debug(f"WAN status map fetched: {wan_status_map}")
+                for iface, status in wan_status_map.items():
+                    _LOGGER.debug(f"  Interface {iface}: up={status.get('up')}, ip={status.get('ip')}, speed={status.get('speed')}, rx_bytes={status.get('rx_bytes')}, tx_bytes={status.get('tx_bytes')}, is_active={status.get('is_active')}")
+            except Exception as e:
+                _LOGGER.debug(f"Failed to get WAN status map: {e}")
+        
+        hass.async_create_task(_fetch_wan_status_background())
 
         # Helper to create multi-wan sensors for a given interface
         def _create_multiwan_sensors(interface_name: str, wan_group: str, ordinal_index: int) -> list[SensorEntity]:

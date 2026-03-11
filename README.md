@@ -83,6 +83,14 @@ Track your secondary WAN connection independently with its own set of performanc
 - **Backward Compatible**: ✅ Works exactly as before
 - **URL Format**: `https://udm-ip` (port 443)
 
+### ✅ Cloud Gateway / Cloud Gateway Ultra
+- **Multi-WAN Support**: ✅ Full dual WAN detection and monitoring
+- **Speed Test Monitoring**: ✅ Full functionality
+- **API Support**: ✅ Modern UniFi OS endpoints
+- **URL Format**: `https://cloudgateway-ip` (port 443)
+- **⚠️ Important**: API key MUST be created via local access (see configuration below)
+- **Thanks to**: [@pterhaar](https://github.com/pterhaar) for Cloud Gateway testing and documentation
+
 ### ✅ Cloud Key Gen2+ with Multi-WAN Gateway
 - **Multi-WAN Support**: ✅ Depends on gateway model (USG Pro 4, UXG Pro)
 - **Speed Test Monitoring**: ✅ Full functionality
@@ -126,6 +134,16 @@ Track your secondary WAN connection independently with its own set of performanc
    - Scroll to API section
    - Click "Create New API Key"
    - Copy the generated key (you won't be able to see it again!)
+
+**⚠️ For Cloud Gateway / Cloud Gateway Ultra:**
+1. **IMPORTANT**: You MUST create the API key using **local access**, NOT via unifi.ui.com
+2. Access your Cloud Gateway locally:
+   - Open browser and go to `https://<local-ip>` (e.g., `https://192.168.1.1`)
+   - Login with your credentials
+   - Click on **Integrations** (lower group of icons on the left sidebar)
+   - Click **Create API Key**
+   - Copy the generated key immediately (you won't be able to see it again!)
+3. During integration setup, select **"UDM Pro/SE/Cloud Key Gen2+"** as the controller type
 
 **For Self-hosted Controllers:**
 - Admin username and password

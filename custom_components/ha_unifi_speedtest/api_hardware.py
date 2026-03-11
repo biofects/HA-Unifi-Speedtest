@@ -284,7 +284,6 @@ class UniFiHardwareAPI(UniFiAPIBase):
     def test_connection(self) -> bool:
         """Test API connection."""
         try:
-            self._resolve_site_ids()
             site_internal, _ = self._resolve_site_ids()
             _ = self._request(self.session.get, f"/proxy/network/v2/api/site/{site_internal}/speedtest")
             return True

@@ -76,14 +76,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
     _LOGGER.info(f"UniFi API instance created for site: {entry.data.get('site', 'default')}, controller_type: {controller_type}, multi_wan: {enable_multi_wan}")
     
-    # Optionally test the connection once during setup
-    ok = await hass.async_add_executor_job(api.test_connection)
-    if not ok:
-        if controller_type == "udm":
-            _LOGGER.error("Failed to validate connection to UniFi controller with provided API key")
-        else:
-            _LOGGER.error("Failed to validate connection to UniFi controller with provided username/password")
-        # We still proceed; sensors will show unavailable until corrected
+    # Test connection in background to avoid blocking startup
+    async def _test_connection_background():
+        """Test connection in background without blocking startup."""
+        ok = await hass.async_add_executor_job(api.test_connection)
+        if not ok:
+            if controller_type == "udm":
+                _LOGGER.error("Failed to validate connection to UniFi controller with provided API key")
+            else:
+                _LOGGER.error("Failed to validate connection to UniFi controller with provided username/password")
+    
+    # Schedule background connection test without waiting for it
+    hass.async_create_task(_test_connection_background())
 
     # Store the API instance
     hass.data[DOMAIN][entry.entry_id] = api
