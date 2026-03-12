@@ -20,6 +20,7 @@
             "verify_ssl": "Verify SSL Certificate",
             "enable_scheduling": "Enable Automatic Speed Tests",
             "schedule_interval": "Speed Test Interval (minutes)",
+            "run_speedtest_on_startup": "Run Speed Test on Home Assistant Startup",
             "enable_multi_wan": "Enable Multi-WAN Detection",
             "show_inactive_wans": "Show Inactive WAN Interfaces"
           }
@@ -45,6 +46,7 @@
             "controller_type": "Controller Type",
             "enable_scheduling": "Enable Automatic Speed Tests",
             "schedule_interval": "Speed Test Interval (minutes)",
+            "run_speedtest_on_startup": "Run Speed Test on Home Assistant Startup",
             "enable_multi_wan": "Enable Multi-WAN Detection"
           }
         }

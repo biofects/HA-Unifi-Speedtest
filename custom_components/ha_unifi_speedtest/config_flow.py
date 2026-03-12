@@ -19,10 +19,12 @@ from .const import (
     CONF_POLLING_INTERVAL,
     CONF_ENABLE_MULTI_WAN,
     CONF_SHOW_INACTIVE_WAN,
+    CONF_RUN_SPEEDTEST_ON_STARTUP,
     DEFAULT_SCHEDULE_INTERVAL,
     DEFAULT_ENABLE_SCHEDULING,
     DEFAULT_ENABLE_MULTI_WAN,
-    DEFAULT_SHOW_INACTIVE_WAN
+    DEFAULT_SHOW_INACTIVE_WAN,
+    DEFAULT_RUN_SPEEDTEST_ON_STARTUP
 )
 from .api_factory import create_unifi_api
 
@@ -178,6 +180,7 @@ class UniFiSpeedTestConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Optional(CONF_VERIFY_SSL, default=False): bool,
             vol.Optional(CONF_ENABLE_SCHEDULING, default=DEFAULT_ENABLE_SCHEDULING): bool,
             vol.Optional(CONF_SCHEDULE_INTERVAL, default=DEFAULT_SCHEDULE_INTERVAL): vol.All(int, vol.Range(min=15, max=1440)),
+            vol.Optional(CONF_RUN_SPEEDTEST_ON_STARTUP, default=DEFAULT_RUN_SPEEDTEST_ON_STARTUP): bool,
         })
         
         if self.controller_type == 'udm':
@@ -265,12 +268,17 @@ class UniFiSpeedTestOptionsFlow(config_entries.OptionsFlow):
             CONF_SHOW_INACTIVE_WAN,
             self.config_entry.data.get(CONF_SHOW_INACTIVE_WAN, DEFAULT_SHOW_INACTIVE_WAN)
         )
+        current_run_speedtest_on_startup = self.config_entry.options.get(
+            CONF_RUN_SPEEDTEST_ON_STARTUP,
+            self.config_entry.data.get(CONF_RUN_SPEEDTEST_ON_STARTUP, DEFAULT_RUN_SPEEDTEST_ON_STARTUP)
+        )
         
         schema_dict = {
             vol.Optional(CONF_SITE, default=current_site): str,
             vol.Optional(CONF_VERIFY_SSL, default=current_verify_ssl): bool,
             vol.Optional(CONF_ENABLE_SCHEDULING, default=current_enable_scheduling): bool,
             vol.Optional(CONF_SCHEDULE_INTERVAL, default=current_schedule_interval): vol.All(int, vol.Range(min=15, max=1440)),
+            vol.Optional(CONF_RUN_SPEEDTEST_ON_STARTUP, default=current_run_speedtest_on_startup): bool,
         }
         
         if current_controller_type == 'udm':

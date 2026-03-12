@@ -21,6 +21,7 @@ CONF_SCHEDULE_INTERVAL = "schedule_interval"
 CONF_POLLING_INTERVAL = "polling_interval"
 CONF_ENABLE_MULTI_WAN = "enable_multi_wan"  # New configuration for multi-WAN support
 CONF_SHOW_INACTIVE_WAN = "show_inactive_wans"
+CONF_RUN_SPEEDTEST_ON_STARTUP = "run_speedtest_on_startup"  # Run initial speedtest after HA starts
 
 # Service names
 SERVICE_START_SPEED_TEST = "start_speed_test"
@@ -34,6 +35,7 @@ DEFAULT_ENABLE_SCHEDULING = True
 DEFAULT_POLLING_INTERVAL = 30  # 30 minutes (auto-calculated when not specified)
 DEFAULT_ENABLE_MULTI_WAN = True  # Enable multi-WAN detection by default
 DEFAULT_SHOW_INACTIVE_WAN = False
+DEFAULT_RUN_SPEEDTEST_ON_STARTUP = False  # Don't run speedtest on startup by default to improve load time
 
 # Rate limiting constants
 MIN_SCHEDULE_INTERVAL = 15  # Minimum 15 minutes between speed tests

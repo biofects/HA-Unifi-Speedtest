@@ -12,7 +12,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, SensorStateClass
 
-from .const import DOMAIN, INTEGRATION_NAME, CONF_SCHEDULE_INTERVAL, CONF_ENABLE_SCHEDULING, CONF_POLLING_INTERVAL, CONF_ENABLE_MULTI_WAN, CONF_HAS_ADMIN
+from .const import DOMAIN, INTEGRATION_NAME, CONF_SCHEDULE_INTERVAL, CONF_ENABLE_SCHEDULING, CONF_POLLING_INTERVAL, CONF_ENABLE_MULTI_WAN, CONF_HAS_ADMIN, CONF_RUN_SPEEDTEST_ON_STARTUP
 from .api_base import UniFiAPIBase
 
 _LOGGER = logging.getLogger(__name__)
@@ -209,13 +209,22 @@ async def async_setup_entry(
         hass.data[DOMAIN][f"{config_entry.entry_id}_schedule_interval"] = schedule_interval
         hass.data[DOMAIN][f"{config_entry.entry_id}_polling_interval"] = polling_interval
 
-        # Trigger one initial speed test soon after startup to seed data
-        async def _initial_seed():
-            seed_delay = random.randint(10, 45)
-            _LOGGER.info(f"Scheduling initial seed speed test in ~{seed_delay}s")
-            await asyncio.sleep(seed_delay)
-            await run_scheduled_speedtest()
-        hass.async_create_task(_initial_seed())
+        # Check if user wants to run speedtest on startup
+        run_speedtest_on_startup = config_entry.options.get(
+            CONF_RUN_SPEEDTEST_ON_STARTUP,
+            config_entry.data.get(CONF_RUN_SPEEDTEST_ON_STARTUP, False)
+        )
+
+        # Optionally trigger one initial speed test soon after startup to seed data
+        if run_speedtest_on_startup:
+            async def _initial_seed():
+                seed_delay = random.randint(10, 45)
+                _LOGGER.info(f"Scheduling initial seed speed test in ~{seed_delay}s (user enabled)")
+                await asyncio.sleep(seed_delay)
+                await run_scheduled_speedtest()
+            hass.async_create_task(_initial_seed())
+        else:
+            _LOGGER.info("Skipping initial seed speed test (disabled by user) - will use last available data")
     else:
         _LOGGER.info(f"Automatic speed test scheduling disabled for {api.controller_type} controller")
         _LOGGER.info(f"Data will be polled every {polling_interval} minutes")
