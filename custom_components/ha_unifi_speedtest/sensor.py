@@ -229,9 +229,10 @@ async def async_setup_entry(
         _LOGGER.info(f"Automatic speed test scheduling disabled for {api.controller_type} controller")
         _LOGGER.info(f"Data will be polled every {polling_interval} minutes")
 
-    # Request initial refresh in background without blocking startup
-    _LOGGER.info("Coordinator created, scheduling initial data refresh.")
-    hass.async_create_task(coordinator.async_refresh())
+    # Do initial data fetch - this is fast (just retrieves existing speedtest results)
+    # The SLOW operation was the initial speedtest trigger, which is now optional
+    _LOGGER.info("Coordinator created, fetching initial speed test data.")
+    await coordinator.async_config_entry_first_refresh()
 
     # Track created WAN sensor keys to avoid duplicates and enable dynamic additions
     created_wan_keys: set[str] = set()
