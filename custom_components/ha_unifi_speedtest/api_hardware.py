@@ -90,6 +90,18 @@ class UniFiHardwareAPI(UniFiAPIBase):
             f"/proxy/network/v2/api/site/{site_internal}/speedtest",
             {} if not interface_name else {"interface_name": interface_name}
         ))
+        
+        # 4) Cloud Gateway / alternative endpoint (no /api/ in path)
+        attempts.append((
+            f"/proxy/network/s/{site_internal}/cmd/devmgr",
+            {"cmd": "speedtest"} if not interface_name else {"cmd": "speedtest", "interface_name": interface_name}
+        ))
+        
+        # 5) Direct v1 API endpoint (some devices)
+        attempts.append((
+            f"/api/s/{site_internal}/cmd/devmgr",
+            {"cmd": "speedtest"} if not interface_name else {"cmd": "speedtest", "interface_name": interface_name}
+        ))
 
         last_error: Optional[Exception] = None
         for path, payload in attempts:
@@ -114,9 +126,29 @@ class UniFiHardwareAPI(UniFiAPIBase):
     def get_wan_interfaces(self) -> List[Dict[str, Any]]:
         """List configured WANs using official integration endpoint."""
         site_internal, site_id = self._resolve_site_ids()
-        path = f"/proxy/network/integration/v1/sites/{site_id}/wans"
-        resp = self._request(self.session.get, path)
-        data = resp.json() or {}
+        
+        # Try multiple endpoints for WAN discovery
+        endpoints = [
+            f"/proxy/network/integration/v1/sites/{site_id}/wans",
+            f"/proxy/network/api/s/{site_internal}/rest/wanconf",
+            f"/api/s/{site_internal}/rest/wanconf",
+        ]
+        
+        data = None
+        for path in endpoints:
+            try:
+                resp = self._request(self.session.get, path)
+                data = resp.json() or {}
+                if data.get("data"):
+                    _LOGGER.debug(f"Using WAN interfaces endpoint: {path}")
+                    break
+            except Exception as e:
+                _LOGGER.debug(f"WAN interfaces endpoint {path} failed: {e}")
+                continue
+        
+        if not data or not data.get("data"):
+            _LOGGER.warning("Could not discover WAN interfaces from any endpoint")
+            return []
         
         wans = []
         for idx, wan in enumerate(data.get("data", []), start=1):
@@ -136,9 +168,39 @@ class UniFiHardwareAPI(UniFiAPIBase):
     def get_speed_test_status(self) -> dict:
         """Return latest speedtest per WAN using official speedtest endpoint."""
         site_internal, _ = self._resolve_site_ids()
-        path = f"/proxy/network/v2/api/site/{site_internal}/speedtest"
-        resp = self._request(self.session.get, path)
-        body = resp.json() or {}
+        
+        # Try multiple endpoints for compatibility
+        endpoints = [
+            f"/proxy/network/v2/api/site/{site_internal}/speedtest",
+            f"/proxy/network/api/s/{site_internal}/stat/speedtest",
+            f"/api/s/{site_internal}/stat/speedtest-results",
+            f"/api/s/{site_internal}/stat/speedtest",
+        ]
+        
+        body = None
+        last_error = None
+        for path in endpoints:
+            try:
+                resp = self._request(self.session.get, path)
+                body = resp.json() or {}
+                if body.get("data") is not None:  # Found valid endpoint
+                    _LOGGER.debug(f"Using speedtest status endpoint: {path}")
+                    break
+            except Exception as e:
+                last_error = e
+                _LOGGER.debug(f"Speedtest status endpoint {path} failed, trying next")
+                continue
+        
+        if body is None:
+            if last_error:
+                _LOGGER.warning(f"All speedtest status endpoints failed, last error: {last_error}")
+            return {
+                "wan_interfaces": [],
+                "total_interfaces": 0,
+                "primary_wan": None,
+                "multi_wan_enabled": True,
+            }
+            
         entries: List[dict] = body.get("data", [])
         
         if not entries:
@@ -198,13 +260,27 @@ class UniFiHardwareAPI(UniFiAPIBase):
     def get_wan_status_map(self) -> Dict[str, Dict[str, Any]]:
         """Return WAN interface status map."""
         site_internal, _ = self._resolve_site_ids()
-        path = f"/proxy/network/api/s/{site_internal}/stat/device"
         
-        try:
-            resp = self._request(self.session.get, path)
-            body = resp.json()
-        except Exception as e:
-            _LOGGER.debug(f"WAN status map fetch failed at request stage: {e}")
+        # Try multiple endpoints for device status
+        endpoints = [
+            f"/proxy/network/api/s/{site_internal}/stat/device",
+            f"/api/s/{site_internal}/stat/device",
+        ]
+        
+        body = None
+        for path in endpoints:
+            try:
+                resp = self._request(self.session.get, path)
+                body = resp.json()
+                if body:
+                    _LOGGER.debug(f"Using device status endpoint: {path}")
+                    break
+            except Exception as e:
+                _LOGGER.debug(f"Device status endpoint {path} failed: {e}")
+                continue
+        
+        if not body:
+            _LOGGER.debug("WAN status map fetch failed - no valid endpoint found")
             return {}
 
         devices: List[Dict[str, Any]] = []

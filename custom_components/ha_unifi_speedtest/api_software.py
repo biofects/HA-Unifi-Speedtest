@@ -98,11 +98,17 @@ class UniFiSoftwareAPI(UniFiAPIBase):
         # Try multiple endpoints
         attempts: List[Tuple[str, Dict[str, Any]]] = []
 
-        # 1) Standard devmgr speedtest command
+        # 1) Standard devmgr speedtest command (most common)
         attempts.append((f"/api/s/{site_internal}/cmd/devmgr", {"cmd": "speedtest"}))
 
-        # 2) Direct speedtest endpoint if supported
+        # 2) Direct speedtest endpoint if supported (newer versions)
         attempts.append((f"/api/s/{site_internal}/cmd/devmgr/speedtest", {}))
+        
+        # 3) Alternative sdn endpoint (some versions)
+        attempts.append((f"/api/s/{site_internal}/cmd/sdn", {"cmd": "speedtest"}))
+        
+        # 4) V2 endpoint (very new versions)
+        attempts.append((f"/v2/api/site/{site_internal}/speedtest", {}))
 
         last_error: Optional[Exception] = None
         for path, payload in attempts:
@@ -150,10 +156,12 @@ class UniFiSoftwareAPI(UniFiAPIBase):
         
         site_internal, _ = self._resolve_site_ids()
         
-        # Try multiple endpoints - health first (more widely supported), then speedtest
+        # Try multiple endpoints - more options for better compatibility
         endpoints_to_try = [
             (f"/api/s/{site_internal}/stat/health", "health"),
             (f"/api/s/{site_internal}/stat/speedtest", "speedtest"),
+            (f"/api/s/{site_internal}/stat/speedtest-results", "speedtest"),
+            (f"/v2/api/site/{site_internal}/speedtest", "speedtest_v2"),
         ]
         
         wan_data = None
@@ -192,6 +200,28 @@ class UniFiSoftwareAPI(UniFiAPIBase):
                         break
                     else:
                         _LOGGER.debug("No www subsystem found in health data")
+                        continue
+                        
+                elif endpoint_type == "speedtest_v2":  # v2 endpoint
+                    tests = data.get("data", [])
+                    if tests:
+                        # Get most recent test
+                        latest = tests[0] if isinstance(tests, list) else tests
+                        
+                        wan_data = {
+                            "interface_name": "wan",
+                            "wan_networkgroup": "WAN",
+                            "download": self._safe_float(latest.get("download_mbps") or latest.get("xput_down")),
+                            "upload": self._safe_float(latest.get("upload_mbps") or latest.get("xput_up")),
+                            "ping": self._safe_float(latest.get("latency_ms") or latest.get("speedtest_ping")),
+                            "timestamp": self._format_timestamp(latest.get("time")),
+                            "status": latest.get("status_text", "completed").lower(),
+                            "id": latest.get("id"),
+                        }
+                        _LOGGER.debug(f"Successfully parsed speedtest v2 endpoint: {wan_data}")
+                        break
+                    else:
+                        _LOGGER.debug("No speedtest data found in v2 endpoint")
                         continue
                         
                 else:  # speedtest endpoint
