@@ -173,7 +173,11 @@ async def async_setup_entry(
                     await asyncio.sleep(t)
                     _LOGGER.debug(f"Post-test refresh after {t}s")
                     await coordinator.async_request_refresh()
-            hass.async_create_task(_post_test_refreshes())
+            config_entry.async_create_background_task(
+                hass,
+                _post_test_refreshes(),
+                f"{DOMAIN} post-speedtest refreshes",
+            )
 
         except Exception as e:
             error_str = str(e).lower()
@@ -215,7 +219,11 @@ async def async_setup_entry(
             _LOGGER.info(f"Scheduling initial seed speed test in ~{seed_delay}s")
             await asyncio.sleep(seed_delay)
             await run_scheduled_speedtest()
-        hass.async_create_task(_initial_seed())
+        config_entry.async_create_background_task(
+            hass,
+            _initial_seed(),
+            f"{DOMAIN} initial seed speedtest",
+        )
     else:
         _LOGGER.info(f"Automatic speed test scheduling disabled for {api.controller_type} controller")
         _LOGGER.info(f"Data will be polled every {polling_interval} minutes")

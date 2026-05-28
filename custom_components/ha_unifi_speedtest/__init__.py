@@ -173,7 +173,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                             await asyncio.sleep(t)
                             _LOGGER.debug(f"Post-manual-test refresh after {t}s")
                             await coordinator.async_request_refresh()
-                    hass.async_create_task(_post_manual_refreshes())
+                    if config_entry:
+                        config_entry.async_create_background_task(
+                            hass,
+                            _post_manual_refreshes(),
+                            f"{DOMAIN} service speedtest refreshes",
+                        )
+                    else:
+                        hass.async_create_background_task(
+                            _post_manual_refreshes(),
+                            f"{DOMAIN} service speedtest refreshes",
+                        )
 
                 # Return success response
                 return {

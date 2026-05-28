@@ -117,7 +117,11 @@ class StartSpeedTestAllButton(ButtonEntity):
                         await asyncio.sleep(t)
                         _LOGGER.debug(f"Button-triggered refresh after {t}s")
                         await coordinator.async_request_refresh()
-                self.hass.async_create_task(_post_refreshes())
+                self._entry.async_create_background_task(
+                    self.hass,
+                    _post_refreshes(),
+                    f"{DOMAIN} button speedtest refreshes",
+                )
                 
         except Exception as e:
             _LOGGER.error(f"Failed to start speed test: {e}")
@@ -153,7 +157,11 @@ class StartSpeedTestWanButton(ButtonEntity):
                         await asyncio.sleep(t)
                         _LOGGER.debug(f"Button-triggered refresh after {t}s for {self._iface}")
                         await coordinator.async_request_refresh()
-                self.hass.async_create_task(_post_refreshes())
+                self._entry.async_create_background_task(
+                    self.hass,
+                    _post_refreshes(),
+                    f"{DOMAIN} button speedtest refreshes {self._iface}",
+                )
                 
         except Exception as e:
             _LOGGER.error(f"Failed to start speed test for {self._iface}: {e}")
