@@ -3,7 +3,7 @@
 
 # 🌐 UniFi Speedtest for Home Assistant
 
-> **Requirement:** This integration requires self-hosted UniFi OS Server software or a UniFi OS console such as a UDM Pro or UDM SE.
+> **Requirement:** This integration requires self-hosted [UniFi OS Server software](https://www.ui.com/download/software/unifi-os-server) or a UniFi OS console such as a UDM Pro or UDM SE.
 
 ## 🔍 About
 
