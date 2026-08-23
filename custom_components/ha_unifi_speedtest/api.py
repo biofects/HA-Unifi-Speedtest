@@ -1,21 +1,22 @@
-"""API client for UDM/UniFi OS Hardware Controllers (API Key Authentication)."""
+"""API client for UniFi OS controllers using API-key authentication."""
+from datetime import datetime
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
-try:
-    from .api_base import UniFiAPIBase
-except ImportError:
-    from api_base import UniFiAPIBase
+import requests
+import urllib3
+from requests import Response
+from requests.adapters import HTTPAdapter
+from requests.exceptions import HTTPError, RequestException, Timeout
+from urllib3.util.retry import Retry
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class UniFiHardwareAPI(UniFiAPIBase):
-    """UniFi API client for UDM/UniFi OS using API Key authentication.
-    
-    Supports: UDM Pro, UDM SE, Cloud Key Gen2+, and other UniFi OS devices.
-    Uses X-API-KEY header for authentication.
-    """
+class UniFiOSAPI:
+    """API client for hardware consoles and self-hosted UniFi OS Server."""
 
     def __init__(
         self,
@@ -25,13 +26,102 @@ class UniFiHardwareAPI(UniFiAPIBase):
         verify_ssl: bool = False,
         enable_multi_wan: bool = True,
     ) -> None:
-        super().__init__(url, site, verify_ssl, "udm", enable_multi_wan)
+        if not api_key:
+            raise ValueError("A local UniFi OS API key is required")
+
+        self.url = url.rstrip("/")
+        self.site = site or "default"
+        self.verify_ssl = verify_ssl
+        self.controller_type = "unifi_os"
+        self.enable_multi_wan = enable_multi_wan
         self.api_key = api_key
-        
-        # Add API key to session headers
-        self.session.headers["X-API-KEY"] = self.api_key
-        
-        _LOGGER.info("Initialized UniFi Hardware API with API key authentication")
+
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": "HomeAssistant-UniFi-Speedtest/4.x",
+            "Accept": "application/json, text/plain, */*",
+            "X-API-KEY": self.api_key,
+        })
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["HEAD", "GET", "POST", "PUT", "DELETE", "OPTIONS", "TRACE"],
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
+        self.session.verify = verify_ssl
+        self._site_id: Optional[str] = None
+
+        _LOGGER.info("Initialized UniFi OS API with API-key authentication")
+
+    def _request(
+        self,
+        method,
+        path: str,
+        *,
+        json: Any = None,
+        params: Dict[str, Any] | None = None,
+        timeout=(10, 30),
+    ) -> Response:
+        """Make a synchronous request intended for an HA executor job."""
+        url = f"{self.url}{path}"
+        try:
+            response = method(url, json=json, params=params, timeout=timeout)
+            response.raise_for_status()
+            return response
+        except HTTPError as err:
+            actual_url = getattr(getattr(err, "response", None), "url", None)
+            response_text = getattr(getattr(err, "response", None), "text", "")
+            _LOGGER.error(
+                "HTTP error for %s: %s - actual URL: %s - response: %s",
+                url,
+                err,
+                actual_url,
+                response_text[:300],
+            )
+            raise
+        except (RequestException, Timeout) as err:
+            _LOGGER.error("Request error for %s: %s", url, err)
+            raise
+
+    @staticmethod
+    def _safe_float(value):
+        """Convert a value to float when possible."""
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return None
+
+    @staticmethod
+    def _format_timestamp(timestamp_ms):
+        """Convert a millisecond timestamp to ISO format."""
+        if timestamp_ms is None:
+            return None
+        try:
+            return datetime.fromtimestamp(int(timestamp_ms) / 1000).isoformat()
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    def get_controller_info(self) -> dict:
+        """Return non-secret controller metadata."""
+        return {
+            "type": self.controller_type,
+            "site": self.site,
+            "url": self.url,
+        }
+
+    def get_health_status(self) -> dict:
+        """Return current client health state."""
+        return {
+            "can_connect": True,
+            "consecutive_403s": 0,
+            "in_cooldown": False,
+            "cooldown_until": None,
+        }
 
     def _resolve_site_ids(self) -> Tuple[str, str]:
         """Resolve and cache site UUID based on internal reference.
@@ -85,20 +175,31 @@ class UniFiHardwareAPI(UniFiAPIBase):
             legacy_payload["interface_name"] = interface_name
         attempts.append((f"/proxy/network/api/s/{site_internal}/cmd/devmgr", legacy_payload))
 
-        # 3) v2 speedtest endpoint
+        # 3) Cloud Gateway / alternative endpoint (no /api/ in path)
         attempts.append((
-            f"/proxy/network/v2/api/site/{site_internal}/speedtest",
-            {} if not interface_name else {"interface_name": interface_name}
+            f"/proxy/network/s/{site_internal}/cmd/devmgr",
+            {"cmd": "speedtest"} if not interface_name else {"cmd": "speedtest", "interface_name": interface_name}
         ))
-
+        
         last_error: Optional[Exception] = None
         for path, payload in attempts:
             try:
                 resp = self._request(self.session.post, path, json=payload, timeout=(10, 45))
                 try:
-                    return resp.json()
+                    result = resp.json()
                 except Exception:
-                    return {"result": "ok", "path": path}
+                    result = None
+
+                meta = result.get("meta", {}) if isinstance(result, dict) else {}
+                result_status = result.get("result") if isinstance(result, dict) else None
+                if meta.get("rc") == "ok" or result_status in ("ok", "success", "started", "queued"):
+                    return result
+
+                last_error = RuntimeError(
+                    f"UniFi did not acknowledge the speed test command at {path}: {result!r}"
+                )
+                _LOGGER.debug("Speedtest endpoint %s returned no command acknowledgement", path)
+                continue
             except Exception as e:
                 last_error = e
                 status = getattr(getattr(e, 'response', None), 'status_code', None)
@@ -114,9 +215,28 @@ class UniFiHardwareAPI(UniFiAPIBase):
     def get_wan_interfaces(self) -> List[Dict[str, Any]]:
         """List configured WANs using official integration endpoint."""
         site_internal, site_id = self._resolve_site_ids()
-        path = f"/proxy/network/integration/v1/sites/{site_id}/wans"
-        resp = self._request(self.session.get, path)
-        data = resp.json() or {}
+        
+        # Try multiple endpoints for WAN discovery
+        endpoints = [
+            f"/proxy/network/integration/v1/sites/{site_id}/wans",
+            f"/proxy/network/api/s/{site_internal}/rest/wanconf",
+        ]
+        
+        data = None
+        for path in endpoints:
+            try:
+                resp = self._request(self.session.get, path)
+                data = resp.json() or {}
+                if data.get("data"):
+                    _LOGGER.debug(f"Using WAN interfaces endpoint: {path}")
+                    break
+            except Exception as e:
+                _LOGGER.debug(f"WAN interfaces endpoint {path} failed: {e}")
+                continue
+        
+        if not data or not data.get("data"):
+            _LOGGER.warning("Could not discover WAN interfaces from any endpoint")
+            return []
         
         wans = []
         for idx, wan in enumerate(data.get("data", []), start=1):
@@ -136,9 +256,37 @@ class UniFiHardwareAPI(UniFiAPIBase):
     def get_speed_test_status(self) -> dict:
         """Return latest speedtest per WAN using official speedtest endpoint."""
         site_internal, _ = self._resolve_site_ids()
-        path = f"/proxy/network/v2/api/site/{site_internal}/speedtest"
-        resp = self._request(self.session.get, path)
-        body = resp.json() or {}
+        
+        # Try multiple endpoints for compatibility
+        endpoints = [
+            f"/proxy/network/v2/api/site/{site_internal}/speedtest",
+            f"/proxy/network/api/s/{site_internal}/stat/speedtest",
+        ]
+        
+        body = None
+        last_error = None
+        for path in endpoints:
+            try:
+                resp = self._request(self.session.get, path)
+                body = resp.json() or {}
+                if body.get("data") is not None:  # Found valid endpoint
+                    _LOGGER.debug(f"Using speedtest status endpoint: {path}")
+                    break
+            except Exception as e:
+                last_error = e
+                _LOGGER.debug(f"Speedtest status endpoint {path} failed, trying next")
+                continue
+        
+        if body is None:
+            if last_error:
+                _LOGGER.warning(f"All speedtest status endpoints failed, last error: {last_error}")
+            return {
+                "wan_interfaces": [],
+                "total_interfaces": 0,
+                "primary_wan": None,
+                "multi_wan_enabled": True,
+            }
+            
         entries: List[dict] = body.get("data", [])
         
         if not entries:
@@ -191,20 +339,33 @@ class UniFiHardwareAPI(UniFiAPIBase):
             "total_interfaces": len(wan_list),
             "primary_wan": primary_key,
             "multi_wan_enabled": True,
-            "platform_type": "udm",
+            "platform_type": "unifi_os",
             "detection_method": "official_speedtest_api",
         }
 
     def get_wan_status_map(self) -> Dict[str, Dict[str, Any]]:
         """Return WAN interface status map."""
         site_internal, _ = self._resolve_site_ids()
-        path = f"/proxy/network/api/s/{site_internal}/stat/device"
         
-        try:
-            resp = self._request(self.session.get, path)
-            body = resp.json()
-        except Exception as e:
-            _LOGGER.debug(f"WAN status map fetch failed at request stage: {e}")
+        # Try multiple endpoints for device status
+        endpoints = [
+            f"/proxy/network/api/s/{site_internal}/stat/device",
+        ]
+        
+        body = None
+        for path in endpoints:
+            try:
+                resp = self._request(self.session.get, path)
+                body = resp.json()
+                if body:
+                    _LOGGER.debug(f"Using device status endpoint: {path}")
+                    break
+            except Exception as e:
+                _LOGGER.debug(f"Device status endpoint {path} failed: {e}")
+                continue
+        
+        if not body:
+            _LOGGER.debug("WAN status map fetch failed - no valid endpoint found")
             return {}
 
         devices: List[Dict[str, Any]] = []
@@ -282,11 +443,9 @@ class UniFiHardwareAPI(UniFiAPIBase):
         return status_map
 
     def test_connection(self) -> bool:
-        """Test API connection."""
+        """Validate API-key access and resolve the configured UniFi OS site."""
         try:
             self._resolve_site_ids()
-            site_internal, _ = self._resolve_site_ids()
-            _ = self._request(self.session.get, f"/proxy/network/v2/api/site/{site_internal}/speedtest")
             return True
         except Exception as e:
             _LOGGER.error(f"Connection test failed: {e}")

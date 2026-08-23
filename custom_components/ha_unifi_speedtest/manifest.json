@@ -6,9 +6,9 @@
   "dependencies": [],
   "documentation": "https://github.com/biofects/HA-Unifi-Speedtest",
   "integration_type": "device",
-  "iot_class": "cloud_polling",
+  "iot_class": "local_polling",
   "issue_tracker": "https://github.com/biofects/HA-Unifi-Speedtest/issues",
-  "requirements": ["requests"],
-  "version": "3.1.3"
+  "requirements": [],
+  "version": "4.0.0"
 }
 

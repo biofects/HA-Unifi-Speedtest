@@ -1,29 +1,38 @@
-## Contributing
-Thank you for your interest in contributing to the **Enhanced Biofects Theme** project! We welcome all contributions, whether they're improvements to the theme, bug fixes, new feature ideas, or feedback.
+# Contributing
 
-### Getting Started
-1. Fork the Repository: Create a fork of the repository on GitHub by clicking the "Fork" button.
-Clone Your Fork: Clone your forked repository to your local machine.
-    ```
-    git clone https://github.com/your-username/Enhanced-Biofects.git
-    ```
-2. Set Up the Environment: Make sure your Home Assistant instance is up-to-date and you have HACS installed for testing.
+Thank you for contributing to the HA UniFi Speedtest Home Assistant custom
+integration.
 
-### Contributing Guidelines
-- New Features: If you're suggesting a new feature, please create an issue to discuss it before starting on the work. This helps ensure that it aligns with the project’s goals and roadmap.
-- Bug Fixes: If you find a bug, create an issue or, if you have a fix ready, open a pull request with a clear description of the issue and the fix.
-- Style: Keep your code organized and comment where necessary, especially for complex parts. This will make maintenance easier for everyone.
+## Supported Scope
 
-### Submitting Pull Requests
-1. Create a Branch: Make a new branch for each feature or fix.
-    ```
-    git checkout -b feature-or-fix-name
-    ```
-2. Commit Your Changes: Write clear, concise commit messages.
-Push to GitHub: Push your branch to your forked repository.
-    ```
-    git push origin feature-or-fix-name
-    ```
-3. Open a Pull Request: Go to the original repository and open a pull request. Describe your changes and reference any relevant issues.
-### Code of Conduct
-Please follow the Contributor Covenant [Code of Conduct](https://github.com/biofects/HA-Unifi-Speedtest/blob/main/CODE_OF_CONDUCT.md) when contributing to this project.
+Version 4 supports UniFi OS hardware consoles and self-hosted UniFi OS Server
+using local API-key authentication. Legacy standalone Network Application
+controllers and username/password authentication are outside the supported
+scope.
+
+## Development
+
+1. Fork and clone the repository.
+2. Create a branch for one focused change.
+3. Add or update tests for changed API behavior.
+4. Run the local checks:
+
+   ```bash
+   python3 -m compileall -q custom_components/ha_unifi_speedtest tests
+   python3 -m unittest discover -s tests -v
+   git diff --check
+   ```
+
+5. Test controller-facing changes against UniFi OS before requesting review.
+
+Never commit API keys, session cookies, controller addresses, public IPs, MAC
+addresses, or unsanitized API responses. Fixtures must contain synthetic or
+redacted data.
+
+## Pull Requests
+
+Describe the behavior changed, link related issues, and list the checks and
+UniFi OS targets used for testing. Update README or changelog content when user
+behavior changes.
+
+Contributions must follow the [Code of Conduct](CODE_OF_CONDUCT.md).

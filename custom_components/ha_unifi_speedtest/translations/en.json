@@ -3,22 +3,15 @@
       "step": {
         "user": {
           "title": "Setup UniFi Speed Test",
+          "description": "Connect to a UniFi OS console or self-hosted UniFi OS Server using a local API key. Legacy standalone Network Application controllers are not supported.",
           "data": {
-            "controller_type": "Controller Type"
-          }
-        },
-        "credentials": {
-          "title": "Configure UniFi Controller Credentials",
-          "description": "Enter your controller credentials and settings.",
-          "data": {
-            "url": "Controller URL",
-            "username": "Username",
-            "password": "Password",
-            "api_key": "API Key",
+            "url": "UniFi OS URL",
+            "api_key": "Local UniFi OS API Key",
             "site": "Site Name",
             "verify_ssl": "Verify SSL Certificate",
             "enable_scheduling": "Enable Automatic Speed Tests",
             "schedule_interval": "Speed Test Interval (minutes)",
+            "run_speedtest_on_startup": "Run Speed Test on Home Assistant Startup",
             "enable_multi_wan": "Enable Multi-WAN Detection",
             "show_inactive_wans": "Show Inactive WAN Interfaces"
           }
@@ -26,7 +19,7 @@
       },
       "error": {
         "cannot_connect": "Cannot connect to the UniFi Controller.",
-        "invalid_auth": "Authentication failed. For self-hosted controllers, verify username/password. For UDM/UniFi OS, verify API key.",
+        "invalid_auth": "Authentication failed. Verify that this is a UniFi OS system and that the local API key is valid.",
         "access_denied": "Access denied. This may be due to rate limiting or incorrect permissions.",
         "timeout": "Connection timeout. Check if the controller is accessible and responsive.",
         "unknown_error": "Unexpected error occurred. Please check logs for details.",
@@ -40,10 +33,11 @@
           "data": {
             "site": "Site Name",
             "verify_ssl": "Verify SSL Certificate",
-            "controller_type": "Controller Type",
             "enable_scheduling": "Enable Automatic Speed Tests",
             "schedule_interval": "Speed Test Interval (minutes)",
-            "enable_multi_wan": "Enable Multi-WAN Detection"
+            "run_speedtest_on_startup": "Run Speed Test on Home Assistant Startup",
+            "enable_multi_wan": "Enable Multi-WAN Detection",
+            "show_inactive_wans": "Show Inactive WAN Interfaces"
           }
         }
       }

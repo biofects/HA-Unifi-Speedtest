@@ -2,13 +2,14 @@
 
 
 # 🌐 UniFi Speedtest for Home Assistant
-# I will be pushing updates soon, sorry all i have been away for a while
+
+> **Requirement:** This integration requires self-hosted [UniFi OS Server software](https://www.ui.com/download/software/unifi-os-server) or a UniFi OS console such as a UDM Pro or UDM SE.
 
 ## 🔍 About
 
-This Home Assistant custom integration provides real-time speed test monitoring for UniFi networks with **full Multi-WAN support**. It supports all UniFi platforms including UDM Pro, UDM SE, Cloud Key, and self-hosted UniFi Controller software, allowing you to track download speed, upload speed, and ping directly within Home Assistant.
+This Home Assistant custom integration provides real-time speed test monitoring for UniFi OS networks with **full Multi-WAN support**. It supports UniFi OS hardware consoles and self-hosted UniFi OS Server, allowing you to track download speed, upload speed, and ping directly within Home Assistant.
 
-**🆕 v3.0.0: API Key Authentication & Modular Architecture** - Simplified authentication with API keys for UDM/UniFi OS, username/password for self-hosted controllers, and separated code architecture for better maintainability.
+**v4.0.0 breaking change:** A local UniFi OS API key is required. Legacy standalone UniFi Network Application controllers using username/password are no longer supported.
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
 [![GitHub Release](https://img.shields.io/github/v/release/biofects/HA-Unifi-Speedtest?style=flat-square)](https://github.com/biofects/HA-Unifi-Speedtest/releases)
@@ -34,11 +35,11 @@ If you find this plugin useful, please consider donating. Your support is greatl
 
 ## ✨ Features
 
-- **🔐 Simplified Authentication**: API key for UDM/UniFi OS, username/password for self-hosted controllers
-- **🎯 Two-Step Configuration**: First select controller type, then provide appropriate credentials
+- **🔐 API Key Authentication**: One local API-key flow for every supported UniFi OS system
+- **🎯 One-Step Configuration**: Enter the UniFi OS URL, API key, site, and integration options
 - **🌐 Full Multi-WAN Support**: Separate devices and sensors for each WAN interface (WAN, WAN2, WAN3, etc.)
 - **📊 Dynamic Entity Creation**: Entities appear automatically once speed test data exists for each WAN
-- **🔧 Universal Compatibility**: Works with UDM Pro, UDM SE, UDM Base, Cloud Key Gen2+, and self-hosted UniFi Controllers
+- **🔧 UniFi OS Compatibility**: Works with UDM Pro, UDM SE, UDM Base, Cloud Gateway, Cloud Key Gen2+, and self-hosted UniFi OS Server
 - **⚡ Real-time Metrics**: Monitor download speeds, upload speeds, and network latency (ping) for each WAN
 - **🚀 Manual Speed Tests**: Button entities for triggering tests on all WANs or specific interfaces
 - **⏱️ Faster Updates**: Automatic refresh scheduling after tests complete for immediate result visibility
@@ -83,17 +84,28 @@ Track your secondary WAN connection independently with its own set of performanc
 - **Backward Compatible**: ✅ Works exactly as before
 - **URL Format**: `https://udm-ip` (port 443)
 
+### ✅ Cloud Gateway / Cloud Gateway Ultra
+- **Multi-WAN Support**: ✅ Full dual WAN detection and monitoring
+- **Speed Test Monitoring**: ✅ Full functionality
+- **API Support**: ✅ Modern UniFi OS endpoints
+- **URL Format**: `https://cloudgateway-ip` (port 443)
+- **⚠️ Important**: API key MUST be created via local access (see configuration below)
+- **Thanks to**: [@pterhaar](https://github.com/pterhaar) for Cloud Gateway testing and documentation
+
 ### ✅ Cloud Key Gen2+ with Multi-WAN Gateway
 - **Multi-WAN Support**: ✅ Depends on gateway model (USG Pro 4, UXG Pro)
 - **Speed Test Monitoring**: ✅ Full functionality
 - **API Support**: ✅ Modern UniFi OS endpoints
 - **URL Format**: `https://cloudkey-ip` (port 443)
 
-### ✅ Traditional UniFi Controller Software
-- **Multi-WAN Support**: ⚠️ Depends on gateway hardware
-- **Speed Test Monitoring**: ✅ Full functionality including API-initiated tests
-- **Legacy Support**: ✅ Enhanced compatibility with older API structures
-- **URL Format**: `https://controller-ip:8443`
+### ✅ Self-hosted UniFi OS Server
+- **Authentication**: Local UniFi OS API key
+- **WAN Status**: May be empty when no gateway hardware is available
+- **URL Format**: Use the local UniFi OS Server URL
+
+### ❌ Legacy Standalone Network Application
+- Username/password authentication and unprefixed `/api/...` endpoints are not supported in v4.
+- Migrate to UniFi OS Server or a UniFi OS hardware console before upgrading.
 
 ## 🚀 Installation
 
@@ -120,47 +132,41 @@ Track your secondary WAN connection independently with its own set of performanc
 
 ### Prerequisites
 
-**For UDM/UniFi OS Controllers:**
-1. Generate an API key in your UniFi controller:
-   - Navigate to Settings → Admins → [Your Admin Account]
-   - Scroll to API section
-   - Click "Create New API Key"
-   - Copy the generated key (you won't be able to see it again!)
+**For all UniFi OS systems:**
+1. Open the console locally at `https://192.168.1.1` (replace the address if your console uses a different local IP).
+2. Sign in and open the **Network** application.
+3. Go to **Settings → Control Plane → Integrations**.
+4. Click **Create API Key**, give the key a recognizable name, and copy it immediately.
+5. Use the generated **Network Integration API key** in Home Assistant.
 
-**For Self-hosted Controllers:**
-- Admin username and password
+> **Important:** Create the key through the local Network application. Keys from `unifi.ui.com`, Site Manager, Protect, or another UniFi application do not authenticate with the local Network API used by this integration.
+
+### Local URL and SSL Examples
+
+UniFi OS normally serves its local API over HTTPS. Disabling certificate verification does not change the URL to HTTP.
+
+| Local console setup | URL | Verify SSL |
+| --- | --- | --- |
+| Local IP with the default self-signed certificate | `https://192.168.1.1` | Off |
+| Local hostname with a trusted certificate matching that hostname | `https://unifi.local` | On |
+| Local IP with a trusted certificate that includes the IP address | `https://192.168.1.1` | On |
+
+Do not use `http://192.168.1.1`. Keep `https://` in the URL even when **Verify SSL** is disabled.
 
 ### Setup Steps
 
 1. Go to **Settings** → **Devices & Services**
 2. Click **"+ Add Integration"**
 3. Search for **"HA Unifi Speedtest"**
-4. **Step 1: Select Controller Type**
-   - Choose **"UDM/UniFi OS"** for:
-     - UDM Pro, UDM SE, UDM Base
-     - Cloud Key Gen2+
-     - Any UniFi OS-based controller
-   - Choose **"Self-hosted Controller"** for:
-     - Traditional UniFi Network Application
-     - Self-hosted/standalone controllers
-5. **Step 2: Enter Credentials**
-   
-   **For UDM/UniFi OS:**
-   - **URL**: Your controller URL (e.g., `https://192.168.1.1` or `https://unifi.local`)
+4. Enter the UniFi OS connection details:
+  - **URL**: Your local console URL (for example, `https://192.168.1.1` or `https://unifi.local`)
    - **API Key**: The API key you generated
    - **Site** (Optional): Site ID (default: "default")
-   - **Verify SSL**: Enable if using valid SSL certificates
+  - **Verify SSL**: Disable for the default self-signed IP certificate; enable for a trusted certificate matching the URL
    - **Enable Multi-WAN**: Enable to detect and monitor multiple WAN interfaces
    - **Show Inactive WANs**: Show entities for disconnected/inactive WANs
    
-   **For Self-hosted Controller:**
-   - **URL**: Your controller URL (e.g., `https://192.168.1.10:8443`)
-   - **Username**: Admin username
-   - **Password**: Admin password
-   - **Site** (Optional): Site ID (default: "default")
-   - **Verify SSL**: Enable if using valid SSL certificates
-
-6. **Configure Options** (can be changed later):
+5. **Configure Options** (can be changed later):
    - **Enable Automatic Speed Tests**: Schedule regular speed tests
    - **Speed Test Interval**: How often to run tests (15-1440 minutes, default: 90)
    - **Polling Interval**: How often to check for results (automatically calculated if not specified)
@@ -185,7 +191,7 @@ For multi-WAN configurations, separate **devices** are created for each WAN inte
 **Additional WANs** (WAN3, WAN4, etc.) follow the same pattern.
 
 ### Single WAN Setup
-For single WAN setups or self-hosted controllers, sensors use clean naming:
+For single WAN setups or self-hosted UniFi OS Server, sensors use clean naming:
 
 - **UniFi Speed Test Download Speed** (Mbit/s)
 - **UniFi Speed Test Upload Speed** (Mbit/s)  
@@ -320,19 +326,16 @@ entities:
 
 ## 📦 What's New
 
-### v3.0.0 (Current) - November 2, 2025
+### v4.0.0 (Current) - August 23, 2026
 **Breaking Changes:**
-- Authentication switched to API Key for UDM/UniFi OS, username/password for self-hosted
-- Two-step configuration flow (controller type → credentials)
-- Sensor naming updated for multi-WAN setups
+- UniFi OS is required on a hardware console or self-hosted UniFi OS Server
+- Local API-key authentication is required
+- Legacy standalone Network Application controllers are no longer supported
 
-**New Features:**
-- Separated API architecture (hardware/software/base/factory pattern)
-- Official UniFi API endpoints throughout
-- Button platform for triggering speed tests
-- Faster UI updates with automatic post-test refreshes
-- Optional "Show Inactive WANs" setting
-- Separate devices per WAN interface
+**Changes:**
+- One-step configuration flow with no controller-type picker
+- One UniFi OS API path for all supported systems
+- Non-UniFi-OS endpoint fallbacks removed
 
 **See [CHANGELOG.md](CHANGELOG.md) for complete details.**
 
@@ -347,19 +350,18 @@ entities:
 ### Common Issues
 
 **Invalid Authentication Error**: 
-- **UDM/UniFi OS**: Verify your API key is correct and hasn't expired
-  - Generate a new API key if needed: Settings → Admins → [Your Admin] → API Key
-- **Self-hosted**: Verify username/password are correct
-  - Ensure the user account has admin privileges
-  - Check if 2FA is enabled (may need to disable or use local admin)
+- Verify your local UniFi OS API key is correct and hasn't expired
+  - Generate a new key if needed: Network → Settings → Control Plane → Integrations
+- Confirm the key was created through the local Network application, not `unifi.ui.com`, Site Manager, or Protect
 
 **Cannot Connect**:
 - Check the URL format:
-  - UDM/UniFi OS: `https://192.168.1.1` (no port)
-  - Self-hosted: `https://192.168.1.10:8443` (usually port 8443)
+  - UniFi OS console: `https://192.168.1.1`
+  - UniFi OS Server: use its locally configured URL and port
 - Verify the controller is accessible from Home Assistant
 - Check firewall settings allow connections
-- Try disabling "Verify SSL" if using self-signed certificates
+- Disable "Verify SSL" when connecting by local IP with the default self-signed certificate
+- Keep using `https://`; disabling verification does not enable plain HTTP
 
 **No Speed Test Data / No Sensors Appear**:
 - Ensure at least one speed test has been run on your controller
@@ -375,16 +377,16 @@ entities:
 - Run a manual speed test to trigger entity creation
 - Check Developer Tools → States for all `sensor.*wan*` entities
 
-### API Key Issues (UDM/UniFi OS)
+### API Key Issues
 
 **API Key Not Working:**
-1. Verify you're using the correct controller type (UDM/UniFi OS, not Self-hosted)
+1. Verify the target runs UniFi OS, not the legacy standalone Network Application
 2. Ensure the API key was copied completely (no spaces or truncation)
 3. Check the API key hasn't been revoked in the controller
 4. Try generating a new API key
 
 **Where to Find API Key:**
-- Settings → Admins → [Your Admin Account] → API Key section → "Create New API Key"
+- Local console → Network → Settings → Control Plane → Integrations → "Create API Key"
 - Save the key immediately - you can't view it again after creation
 
 ### Multi-WAN Detection Issues

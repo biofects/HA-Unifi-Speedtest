@@ -2,25 +2,19 @@
 
 DOMAIN = "ha_unifi_speedtest"
 INTEGRATION_NAME = "HA Unifi Speedtest"
-DEFAULT_NAME = "HA Unifi Speedtest"
-
-# Platforms supported by this integration
-PLATFORMS = ["sensor", "button"]
 
 # Configuration keys
 CONF_URL = "url"
-CONF_USERNAME = "username"
-CONF_PASSWORD = "password"
 CONF_API_KEY = "api_key"
 CONF_SITE = "site"
 CONF_VERIFY_SSL = "verify_ssl"
-CONF_CONTROLLER_TYPE = "controller_type"
 CONF_HAS_ADMIN = "has_admin_access"  # Whether user has admin privileges
 CONF_ENABLE_SCHEDULING = "enable_scheduling"
 CONF_SCHEDULE_INTERVAL = "schedule_interval"
 CONF_POLLING_INTERVAL = "polling_interval"
 CONF_ENABLE_MULTI_WAN = "enable_multi_wan"  # New configuration for multi-WAN support
 CONF_SHOW_INACTIVE_WAN = "show_inactive_wans"
+CONF_RUN_SPEEDTEST_ON_STARTUP = "run_speedtest_on_startup"  # Run initial speedtest after HA starts
 
 # Service names
 SERVICE_START_SPEED_TEST = "start_speed_test"
@@ -34,6 +28,7 @@ DEFAULT_ENABLE_SCHEDULING = True
 DEFAULT_POLLING_INTERVAL = 30  # 30 minutes (auto-calculated when not specified)
 DEFAULT_ENABLE_MULTI_WAN = True  # Enable multi-WAN detection by default
 DEFAULT_SHOW_INACTIVE_WAN = False
+DEFAULT_RUN_SPEEDTEST_ON_STARTUP = False  # Don't run speedtest on startup by default to improve load time
 
 # Rate limiting constants
 MIN_SCHEDULE_INTERVAL = 15  # Minimum 15 minutes between speed tests
@@ -48,57 +43,4 @@ ERROR_MESSAGES = {
     "timeout": "Connection timeout. Check if the controller is accessible and responsive.",
     "unknown_error": "An unexpected error occurred. Check logs for details.",
     "polling_too_frequent": "Data polling interval must be less than the speed test interval to avoid conflicts and rate limiting."
-}
-
-# Polling interval calculation presets based on speed test frequency
-def get_polling_calculation_info(schedule_interval: int) -> dict:
-    """Get information about how polling interval is calculated."""
-    if schedule_interval <= 30:
-        calculated = max(10, schedule_interval // 3)
-        description = "Very frequent speed tests - minimal polling to prevent conflicts"
-    elif schedule_interval <= 60:
-        calculated = max(15, schedule_interval // 2) 
-        description = "Moderate frequency - balanced polling interval"
-    else:
-        calculated = max(20, schedule_interval // 3)
-        description = "Conservative frequency - optimized polling interval"
-    
-    return {
-        "calculated_interval": calculated,
-        "description": description,
-        "ratio": f"1:{schedule_interval//calculated if calculated > 0 else 1}"
-    }
-
-# Recommended interval presets for different use cases
-INTERVAL_PRESETS = {
-    "conservative": {
-        "schedule": 120,  # 2 hours
-        "description": "Conservative settings to minimize API calls and avoid rate limiting",
-        "use_case": "24/7 monitoring with minimal controller load"
-    },
-    "balanced": {
-        "schedule": 60,   # 1 hour  
-        "description": "Balanced settings for regular monitoring with reasonable API usage",
-        "use_case": "Regular monitoring during business hours"
-    },
-    "frequent": {
-        "schedule": 30,   # 30 minutes
-        "description": "More frequent monitoring - may trigger rate limiting on some controllers",
-        "use_case": "Active troubleshooting or performance monitoring"
-    },
-    "debug": {
-        "schedule": 15,   # 15 minutes
-        "description": "For debugging only - likely to trigger rate limiting",
-        "use_case": "Short-term testing and debugging only"
-    }
-}
-
-# Auto-calculation examples for user reference
-POLLING_EXAMPLES = {
-    15: {"polling": 10, "note": "Minimum intervals - debug use only"},
-    30: {"polling": 15, "note": "Frequent monitoring - watch for rate limits"},
-    60: {"polling": 20, "note": "Balanced approach - good for regular use"},
-    90: {"polling": 30, "note": "Conservative default - reliable operation"},
-    120: {"polling": 40, "note": "Conservative monitoring - minimal controller load"},
-    180: {"polling": 60, "note": "Very conservative - minimal impact"}
 }
