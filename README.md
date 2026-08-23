@@ -133,21 +133,25 @@ Track your secondary WAN connection independently with its own set of performanc
 ### Prerequisites
 
 **For all UniFi OS systems:**
-1. Generate an API key in your UniFi controller:
-   - Navigate to Settings → Admins → [Your Admin Account]
-   - Scroll to API section
-   - Click "Create New API Key"
-   - Copy the generated key (you won't be able to see it again!)
+1. Open the console locally at `https://192.168.1.1` (replace the address if your console uses a different local IP).
+2. Sign in and open the **Network** application.
+3. Go to **Settings → Control Plane → Integrations**.
+4. Click **Create API Key**, give the key a recognizable name, and copy it immediately.
+5. Use the generated **Network Integration API key** in Home Assistant.
 
-**⚠️ For Cloud Gateway / Cloud Gateway Ultra:**
-1. **IMPORTANT**: You MUST create the API key using **local access**, NOT via unifi.ui.com
-2. Access your Cloud Gateway locally:
-   - Open browser and go to `https://<local-ip>` (e.g., `https://192.168.1.1`)
-   - Login with your credentials
-   - Click on **Integrations** (lower group of icons on the left sidebar)
-   - Click **Create API Key**
-   - Copy the generated key immediately (you won't be able to see it again!)
-3. Use the same local API-key flow during integration setup.
+> **Important:** Create the key through the local Network application. Keys from `unifi.ui.com`, Site Manager, Protect, or another UniFi application do not authenticate with the local Network API used by this integration.
+
+### Local URL and SSL Examples
+
+UniFi OS normally serves its local API over HTTPS. Disabling certificate verification does not change the URL to HTTP.
+
+| Local console setup | URL | Verify SSL |
+| --- | --- | --- |
+| Local IP with the default self-signed certificate | `https://192.168.1.1` | Off |
+| Local hostname with a trusted certificate matching that hostname | `https://unifi.local` | On |
+| Local IP with a trusted certificate that includes the IP address | `https://192.168.1.1` | On |
+
+Do not use `http://192.168.1.1`. Keep `https://` in the URL even when **Verify SSL** is disabled.
 
 ### Setup Steps
 
@@ -155,10 +159,10 @@ Track your secondary WAN connection independently with its own set of performanc
 2. Click **"+ Add Integration"**
 3. Search for **"HA Unifi Speedtest"**
 4. Enter the UniFi OS connection details:
-   - **URL**: Your controller URL (e.g., `https://192.168.1.1` or `https://unifi.local`)
+  - **URL**: Your local console URL (for example, `https://192.168.1.1` or `https://unifi.local`)
    - **API Key**: The API key you generated
    - **Site** (Optional): Site ID (default: "default")
-   - **Verify SSL**: Enable if using valid SSL certificates
+  - **Verify SSL**: Disable for the default self-signed IP certificate; enable for a trusted certificate matching the URL
    - **Enable Multi-WAN**: Enable to detect and monitor multiple WAN interfaces
    - **Show Inactive WANs**: Show entities for disconnected/inactive WANs
    
@@ -347,8 +351,8 @@ entities:
 
 **Invalid Authentication Error**: 
 - Verify your local UniFi OS API key is correct and hasn't expired
-  - Generate a new API key if needed: Settings → Admins → [Your Admin] → API Key
-- Confirm the key was created through local UniFi OS access, not unifi.ui.com
+  - Generate a new key if needed: Network → Settings → Control Plane → Integrations
+- Confirm the key was created through the local Network application, not `unifi.ui.com`, Site Manager, or Protect
 
 **Cannot Connect**:
 - Check the URL format:
@@ -356,7 +360,8 @@ entities:
   - UniFi OS Server: use its locally configured URL and port
 - Verify the controller is accessible from Home Assistant
 - Check firewall settings allow connections
-- Try disabling "Verify SSL" if using self-signed certificates
+- Disable "Verify SSL" when connecting by local IP with the default self-signed certificate
+- Keep using `https://`; disabling verification does not enable plain HTTP
 
 **No Speed Test Data / No Sensors Appear**:
 - Ensure at least one speed test has been run on your controller
@@ -381,7 +386,7 @@ entities:
 4. Try generating a new API key
 
 **Where to Find API Key:**
-- Settings → Admins → [Your Admin Account] → API Key section → "Create New API Key"
+- Local console → Network → Settings → Control Plane → Integrations → "Create API Key"
 - Save the key immediately - you can't view it again after creation
 
 ### Multi-WAN Detection Issues
