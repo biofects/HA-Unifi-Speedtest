@@ -1,12 +1,13 @@
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import config_validation as cv
 import voluptuous as vol
 import logging
 import asyncio
 
-from .const import DOMAIN, INTEGRATION_NAME, SERVICE_START_SPEED_TEST, SERVICE_GET_SPEED_TEST_STATUS, SERVICE_GET_WAN_INTERFACES, CONF_SCHEDULE_INTERVAL, CONF_ENABLE_SCHEDULING, CONF_ENABLE_MULTI_WAN, CONF_HAS_ADMIN, CONF_URL, CONF_API_KEY, CONF_SITE, CONF_VERIFY_SSL, CONF_CONTROLLER_TYPE, CONF_USERNAME, CONF_PASSWORD
-from .api_factory import create_unifi_api
+from .const import DOMAIN, INTEGRATION_NAME, SERVICE_START_SPEED_TEST, SERVICE_GET_SPEED_TEST_STATUS, SERVICE_GET_WAN_INTERFACES, CONF_SCHEDULE_INTERVAL, CONF_ENABLE_SCHEDULING, CONF_ENABLE_MULTI_WAN, CONF_HAS_ADMIN, CONF_URL, CONF_API_KEY, CONF_SITE, CONF_VERIFY_SSL
+from .api import UniFiOSAPI
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,68 +34,50 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     enable_multi_wan = entry.options.get(CONF_ENABLE_MULTI_WAN, 
                                         entry.data.get(CONF_ENABLE_MULTI_WAN, True))
     
-    # Detect controller type from saved config or infer from available credentials
-    controller_type = entry.data.get(CONF_CONTROLLER_TYPE)
-    if not controller_type:
-        # Auto-detect based on which credentials are available
-        if CONF_API_KEY in entry.data:
-            controller_type = "udm"
-            _LOGGER.info("Controller type not set, detected 'udm' from API key presence")
-        elif CONF_USERNAME in entry.data and CONF_PASSWORD in entry.data:
-            controller_type = "controller"
-            _LOGGER.info("Controller type not set, detected 'controller' from username/password presence")
-        else:
-            # Fallback to controller (self-hosted) as it's more common
-            controller_type = "controller"
-            _LOGGER.warning("Controller type not set and credentials ambiguous, defaulting to 'controller'")
-    
-    # Prepare credentials based on controller type
-    if controller_type == "udm":
-        if CONF_API_KEY not in entry.data:
-            _LOGGER.error("Controller type is 'udm' but API key is missing from configuration")
-            return False
-        api = create_unifi_api(
-            url=entry.data[CONF_URL],
-            controller_type=controller_type,
-            api_key=entry.data[CONF_API_KEY],
-            site=entry.data.get(CONF_SITE, "default"),
-            verify_ssl=entry.data.get(CONF_VERIFY_SSL, False),
-            enable_multi_wan=enable_multi_wan
+    api_key = entry.data.get(CONF_API_KEY)
+    if not api_key:
+        raise ConfigEntryAuthFailed(
+            "HA UniFi Speedtest v4 requires a local UniFi OS API key. "
+            "Entries without an API key must be configured again."
         )
-    else:  # software controller
-        if CONF_USERNAME not in entry.data or CONF_PASSWORD not in entry.data:
-            _LOGGER.error("Controller type is 'controller' but username/password is missing from configuration")
-            return False
-        api = create_unifi_api(
-            url=entry.data[CONF_URL],
-            controller_type=controller_type,
-            username=entry.data[CONF_USERNAME],
-            password=entry.data[CONF_PASSWORD],
-            site=entry.data.get(CONF_SITE, "default"),
-            verify_ssl=entry.data.get(CONF_VERIFY_SSL, False),
-            enable_multi_wan=enable_multi_wan
-        )
-    _LOGGER.info(f"UniFi API instance created for site: {entry.data.get('site', 'default')}, controller_type: {controller_type}, multi_wan: {enable_multi_wan}")
+
+    api = UniFiOSAPI(
+        url=entry.data[CONF_URL],
+        api_key=api_key,
+        site=entry.options.get(CONF_SITE, entry.data.get(CONF_SITE, "default")),
+        verify_ssl=entry.options.get(
+            CONF_VERIFY_SSL,
+            entry.data.get(CONF_VERIFY_SSL, False),
+        ),
+        enable_multi_wan=enable_multi_wan
+    )
+    _LOGGER.info(
+        "UniFi OS API instance created for site %s (multi-WAN: %s)",
+        entry.options.get(CONF_SITE, entry.data.get(CONF_SITE, "default")),
+        enable_multi_wan,
+    )
     
     # Test connection in background to avoid blocking startup
     async def _test_connection_background():
         """Test connection in background without blocking startup."""
         ok = await hass.async_add_executor_job(api.test_connection)
         if not ok:
-            if controller_type == "udm":
-                _LOGGER.error("Failed to validate connection to UniFi controller with provided API key")
-            else:
-                _LOGGER.error("Failed to validate connection to UniFi controller with provided username/password")
+            _LOGGER.error("Failed to validate UniFi OS connection with provided API key")
     
     # Schedule background connection test without waiting for it
-    hass.async_create_task(_test_connection_background())
+    entry.async_create_background_task(
+        hass,
+        _test_connection_background(),
+        f"{DOMAIN} connection test",
+    )
 
     # Store the API instance
     hass.data[DOMAIN][entry.entry_id] = api
     _LOGGER.info("API instance stored in hass.data.")
 
-    # Forward entry setup to sensor platform
-    await hass.config_entries.async_forward_entry_setups(entry, ["sensor", "button"])
+    # The button platform depends on the coordinator created by sensor setup.
+    await hass.config_entries.async_forward_entry_setups(entry, ["sensor"])
+    await hass.config_entries.async_forward_entry_setups(entry, ["button"])
     _LOGGER.info("Forwarded entry setup to sensor and button platforms.")
 
     # Register services (only register once for the domain)
@@ -177,7 +160,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                             await asyncio.sleep(t)
                             _LOGGER.debug(f"Post-manual-test refresh after {t}s")
                             await coordinator.async_request_refresh()
-                    hass.async_create_task(_post_manual_refreshes())
+                    if config_entry:
+                        config_entry.async_create_background_task(
+                            hass,
+                            _post_manual_refreshes(),
+                            f"{DOMAIN} service speedtest refreshes",
+                        )
+                    else:
+                        hass.async_create_background_task(
+                            _post_manual_refreshes(),
+                            f"{DOMAIN} service speedtest refreshes",
+                        )
 
                 # Return success response
                 return {
@@ -229,28 +222,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _LOGGER.info(f"Speed test status requested for config entry: {config_entry_id}")
             try:
                 status = await hass.async_add_executor_job(api_instance.get_speed_test_status)
-                # Always set a short string as the state
-                if isinstance(status, dict):
-                    if 'error' in status and status['error']:
-                        state = "error"
-                    elif 'wan_interfaces' in status and status.get('total_interfaces', 0) > 0:
-                        state = "ok"
-                    elif all(k in status for k in ("download", "upload", "ping")):
-                        if all(status.get(k) is not None for k in ("download", "upload", "ping")):
-                            state = "ok"
-                        else:
-                            state = "unavailable"
-                    else:
-                        state = "unknown"
-                else:
-                    state = str(status)[:32]  # fallback, truncate if needed
-
-                # Only put the full status in attributes, never in state
-                hass.states.async_set(
-                    "sensor.unifi_speed_test_status",
-                    state,
-                    attributes=status if isinstance(status, dict) else {}
-                )
                 _LOGGER.info(f"Speed test status retrieved: {status}")
                 return {
                     "success": True,
@@ -270,7 +241,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             SERVICE_START_SPEED_TEST,
             start_speed_test,
             schema=START_SPEED_TEST_SCHEMA,
-            supports_response=True,
+            supports_response=SupportsResponse.OPTIONAL,
         )
         
         async def get_wan_interfaces(call: ServiceCall) -> dict:
@@ -332,7 +303,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             SERVICE_GET_WAN_INTERFACES,
             get_wan_interfaces,
             schema=GET_WAN_INTERFACES_SCHEMA,
-            supports_response=True,
+            supports_response=SupportsResponse.OPTIONAL,
         )
         
         hass.services.async_register(
@@ -340,7 +311,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             SERVICE_GET_SPEED_TEST_STATUS,
             get_speed_test_status,
             schema=START_SPEED_TEST_SCHEMA,  # Same schema for consistency
-            supports_response=True,
+            supports_response=SupportsResponse.OPTIONAL,
         )
         
         _LOGGER.info("Services registered: start_speed_test, get_speed_test_status, get_wan_interfaces")
@@ -429,29 +400,27 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, ["sensor", "button"])
 
     if unload_ok:
-        # Clean up stored data for this specific entry
-        if entry.entry_id in hass.data[DOMAIN]:
-            del hass.data[DOMAIN][entry.entry_id]
-        
-        # Clean up tracker data for this entry
-        tracker_key = f"{entry.entry_id}_tracker"
-        if tracker_key in hass.data[DOMAIN]:
-            del hass.data[DOMAIN][tracker_key]
-        
-        # Clean up coordinator reference
-        coord_key = f"{entry.entry_id}_coordinator"
-        if coord_key in hass.data[DOMAIN]:
-            del hass.data[DOMAIN][coord_key]
+        for key in list(hass.data[DOMAIN]):
+            if key == entry.entry_id or key.startswith(f"{entry.entry_id}_"):
+                del hass.data[DOMAIN][key]
 
         # Remove services only if this was the last config entry
-        remaining_entries = [key for key in hass.data[DOMAIN].keys() 
-                           if not key.endswith('_tracker') and not key.endswith('_listener')]
+        remaining_entries = [
+            value
+            for value in hass.data[DOMAIN].values()
+            if isinstance(value, UniFiOSAPI)
+        ]
         if not remaining_entries:  # If no more config entries
             if hass.services.has_service(DOMAIN, SERVICE_START_SPEED_TEST):
                 hass.services.async_remove(DOMAIN, SERVICE_START_SPEED_TEST)
             if hass.services.has_service(DOMAIN, SERVICE_GET_SPEED_TEST_STATUS):
                 hass.services.async_remove(DOMAIN, SERVICE_GET_SPEED_TEST_STATUS)
-            _LOGGER.info("Removed services: start_speed_test, get_speed_test_status")
+            if hass.services.has_service(DOMAIN, SERVICE_GET_WAN_INTERFACES):
+                hass.services.async_remove(DOMAIN, SERVICE_GET_WAN_INTERFACES)
+            _LOGGER.info(
+                "Removed services: start_speed_test, get_speed_test_status, "
+                "get_wan_interfaces"
+            )
         
         _LOGGER.info("Integration data removed from hass.data.")
     else:

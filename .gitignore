@@ -1,7 +1,15 @@
-# Byte-compiled / optimized / DLL files
-__pycache__/
+# HA UniFi Speedtest local artifacts
+**/__pycache__/
 *.py[cod]
 *$py.class
+.ruff_cache/
+.devcontainer/.env
+
+# Local Home Assistant test/config data
+config/
+home-assistant.log*
+home-assistant_v2.db*
+deps/
 
 # C extensions
 *.so

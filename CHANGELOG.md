@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [4.0.0] - 2026-08-23
+
+### Breaking changes
+
+- Requires UniFi OS on a hardware console or self-hosted UniFi OS Server.
+- Removes legacy standalone UniFi Network Application controller support.
+- Removes username/password authentication and requires a local API key.
+- Removes the controller-type selection step from initial configuration.
+- Existing API-key entries continue to load. Existing username/password-only
+  entries must be removed and configured against UniFi OS with an API key.
+
+### Changed
+
+- Uses one UniFi OS API client for all supported installations.
+- Removes bare `/api/s/...` endpoint fallbacks; only UniFi OS
+  `/proxy/network/...` routes remain.
+- Treats an empty gateway interface table as unsupported and returns an empty
+  WAN status map without failing entity updates.
+- Adds API contract tests for authentication, trigger acknowledgement, endpoint
+  fallback behavior, and empty WAN status data.
+
 ## [3.0.0] - 2026-02-23
 
 Focus: Simpler, more robust implementation using official UniFi APIs, proper Multi-WAN support, and better UX.

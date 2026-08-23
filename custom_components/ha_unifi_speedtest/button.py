@@ -7,13 +7,13 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.components.button import ButtonEntity
 
 from .const import DOMAIN, INTEGRATION_NAME, CONF_ENABLE_MULTI_WAN, DEFAULT_ENABLE_MULTI_WAN
-from .api_base import UniFiAPIBase
+from .api import UniFiOSAPI
 
 _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     """Set up UniFi Speed Test button entities."""
-    api: UniFiAPIBase = hass.data[DOMAIN][entry.entry_id]
+    api: UniFiOSAPI = hass.data[DOMAIN][entry.entry_id]
 
     entities: list[ButtonEntity] = []
 
@@ -40,7 +40,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                     hass.data[DOMAIN][f"{entry.entry_id}_wan_status"] = status_map
                 except Exception as e:
                     _LOGGER.debug(f"Could not get WAN status map: {e}")
-            hass.async_create_task(_fetch_wan_status())
+            entry.async_create_background_task(
+                hass,
+                _fetch_wan_status(),
+                f"{DOMAIN} button WAN status",
+            )
 
         def _is_active(iface: str) -> bool:
             """Check if WAN interface is active."""
@@ -93,13 +97,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             if new_entities:
                 async_add_entities(new_entities, True)
         
-        coordinator.async_add_listener(_coordinator_listener)
+        entry.async_on_unload(
+            coordinator.async_add_listener(_coordinator_listener)
+        )
 
 
 class StartSpeedTestAllButton(ButtonEntity):
     """Button to start speed test on all WAN interfaces."""
     
-    def __init__(self, api: UniFiAPIBase, entry: ConfigEntry):
+    def __init__(self, api: UniFiOSAPI, entry: ConfigEntry):
         """Initialize the button."""
         self._api = api
         self._entry = entry
@@ -123,7 +129,11 @@ class StartSpeedTestAllButton(ButtonEntity):
                         await asyncio.sleep(t)
                         _LOGGER.debug(f"Button-triggered refresh after {t}s")
                         await coordinator.async_request_refresh()
-                self.hass.async_create_task(_post_refreshes())
+                self._entry.async_create_background_task(
+                    self.hass,
+                    _post_refreshes(),
+                    f"{DOMAIN} button speedtest refreshes",
+                )
                 
         except Exception as e:
             _LOGGER.error(f"Failed to start speed test: {e}")
@@ -133,7 +143,7 @@ class StartSpeedTestAllButton(ButtonEntity):
 class StartSpeedTestWanButton(ButtonEntity):
     """Button to start speed test on a specific WAN interface."""
     
-    def __init__(self, api: UniFiAPIBase, entry: ConfigEntry, interface_name: str, wan_group: str):
+    def __init__(self, api: UniFiOSAPI, entry: ConfigEntry, interface_name: str, wan_group: str):
         """Initialize the button."""
         self._api = api
         self._entry = entry
@@ -159,7 +169,11 @@ class StartSpeedTestWanButton(ButtonEntity):
                         await asyncio.sleep(t)
                         _LOGGER.debug(f"Button-triggered refresh after {t}s for {self._iface}")
                         await coordinator.async_request_refresh()
-                self.hass.async_create_task(_post_refreshes())
+                self._entry.async_create_background_task(
+                    self.hass,
+                    _post_refreshes(),
+                    f"{DOMAIN} button speedtest refreshes {self._iface}",
+                )
                 
         except Exception as e:
             _LOGGER.error(f"Failed to start speed test for {self._iface}: {e}")

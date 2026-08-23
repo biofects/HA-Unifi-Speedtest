@@ -13,7 +13,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, SensorStateClass
 
 from .const import DOMAIN, INTEGRATION_NAME, CONF_SCHEDULE_INTERVAL, CONF_ENABLE_SCHEDULING, CONF_POLLING_INTERVAL, CONF_ENABLE_MULTI_WAN, CONF_HAS_ADMIN, CONF_RUN_SPEEDTEST_ON_STARTUP
-from .api_base import UniFiAPIBase
+from .api import UniFiOSAPI
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ async def async_setup_entry(
     """Set up the UniFi Speed Test sensors."""
     _LOGGER.debug("Setting up UniFi Speed Test sensors")
     # Retrieve the API instance from hass.data
-    api: UniFiAPIBase = hass.data[DOMAIN][config_entry.entry_id]
+    api: UniFiOSAPI = hass.data[DOMAIN][config_entry.entry_id]
     _LOGGER.debug(f"API instance retrieved: {api}")
 
     # Create a tracker for speed test runs with persistence
@@ -60,14 +60,15 @@ async def async_setup_entry(
             
             # Fetch speed test status
             speed_test_data = await hass.async_add_executor_job(api.get_speed_test_status)
+
+            if speed_test_tracker.observe_results(speed_test_data):
+                await speed_test_tracker.async_save()
             
-            # Also update WAN status map for availability checking (UDM only)
-            if api.controller_type == 'udm':
-                try:
-                    wan_status = await hass.async_add_executor_job(api.get_wan_status_map)
-                    hass.data[DOMAIN][f"{config_entry.entry_id}_wan_status"] = wan_status
-                except Exception as e:
-                    _LOGGER.debug(f"Could not update WAN status map: {e}")
+            try:
+                wan_status = await hass.async_add_executor_job(api.get_wan_status_map)
+                hass.data[DOMAIN][f"{config_entry.entry_id}_wan_status"] = wan_status
+            except Exception as e:
+                _LOGGER.debug(f"Could not update WAN status map: {e}")
             
             return speed_test_data
             
@@ -173,7 +174,11 @@ async def async_setup_entry(
                     await asyncio.sleep(t)
                     _LOGGER.debug(f"Post-test refresh after {t}s")
                     await coordinator.async_request_refresh()
-            hass.async_create_task(_post_test_refreshes())
+            config_entry.async_create_background_task(
+                hass,
+                _post_test_refreshes(),
+                f"{DOMAIN} post-speedtest refreshes",
+            )
 
         except Exception as e:
             error_str = str(e).lower()
@@ -222,7 +227,11 @@ async def async_setup_entry(
                 _LOGGER.info(f"Scheduling initial seed speed test in ~{seed_delay}s (user enabled)")
                 await asyncio.sleep(seed_delay)
                 await run_scheduled_speedtest()
-            hass.async_create_task(_initial_seed())
+            config_entry.async_create_background_task(
+                hass,
+                _initial_seed(),
+                f"{DOMAIN} initial seed speedtest",
+            )
         else:
             _LOGGER.info("Skipping initial seed speed test (disabled by user) - will use last available data")
     else:
@@ -291,8 +300,8 @@ async def async_setup_entry(
     sensors: list[SensorEntity] = []
     coordinator_data = coordinator.data
 
-    if api.controller_type == 'udm' and enable_multi_wan:
-        _LOGGER.info("UDM controller detected with Multi-WAN enabled - sensors will appear after first speed test")
+    if enable_multi_wan:
+        _LOGGER.info("UniFi OS Multi-WAN enabled - sensors will appear after first speed test")
 
         # Initialize empty WAN status map, will be populated by coordinator updates
         wan_status_map = {}
@@ -310,7 +319,11 @@ async def async_setup_entry(
             except Exception as e:
                 _LOGGER.debug(f"Failed to get WAN status map: {e}")
         
-        hass.async_create_task(_fetch_wan_status_background())
+        config_entry.async_create_background_task(
+            hass,
+            _fetch_wan_status_background(),
+            f"{DOMAIN} sensor WAN status",
+        )
 
         # Helper to create multi-wan sensors for a given interface
         def _create_multiwan_sensors(interface_name: str, wan_group: str, ordinal_index: int) -> list[SensorEntity]:
@@ -407,23 +420,33 @@ async def async_setup_entry(
                 _LOGGER.info(f"Discovered new active WAN interfaces at runtime, adding {len(new_entities)} entities")
                 async_add_entities(new_entities)
 
-        # Attach listener
-        coordinator.async_add_listener(_coordinator_listener)
+        config_entry.async_on_unload(
+            coordinator.async_add_listener(_coordinator_listener)
+        )
 
     else:
         # Traditional controller or multi-wan disabled - single WAN
         _LOGGER.info("Traditional controller or multi-WAN disabled - creating single WAN device")
         sensors.extend([
-            UniFiSpeedTestSensor(coordinator, "Download Speed", "download"),
-            UniFiSpeedTestSensor(coordinator, "Upload Speed", "upload"),
-            UniFiSpeedTestSensor(coordinator, "Ping", "ping"),
+            UniFiSpeedTestSensor(coordinator, "Download Speed", "download", config_entry.entry_id),
+            UniFiSpeedTestSensor(coordinator, "Upload Speed", "upload", config_entry.entry_id),
+            UniFiSpeedTestSensor(coordinator, "Ping", "ping", config_entry.entry_id),
         ])
     
     # Add common sensors
     sensors.extend([
-        SpeedTestRunsSensor(speed_test_tracker, "Speed Test Runs"),
-        UniFiAPIHealthSensor(api, "API Health")
+        SpeedTestRunsSensor(coordinator, speed_test_tracker, "Speed Test Runs", config_entry.entry_id),
+        UniFiAPIHealthSensor(api, "API Health", config_entry.entry_id)
     ])
+
+    # Only legacy sensor IDs need entry scoping; button IDs already include it.
+    entry_suffix = f"_{config_entry.entry_id}"
+    for entity in er.async_entries_for_config_entry(entity_reg, config_entry.entry_id):
+        if entity.domain == "sensor" and not entity.unique_id.endswith(entry_suffix):
+            entity_reg.async_update_entity(
+                entity.entity_id,
+                new_unique_id=f"{entity.unique_id}{entry_suffix}",
+            )
     
     _LOGGER.info(f"Sensors created: {[s.name for s in sensors]}")
     async_add_entities(sensors)
@@ -452,6 +475,7 @@ class SpeedTestTracker:
         self.last_manual_run = None
         self.last_failure_reason = None
         self.failure_reasons = []  # Keep track of recent failure reasons
+        self.last_observed_results = {}
     
     async def async_load(self):
         """Load data from storage."""
@@ -469,6 +493,7 @@ class SpeedTestTracker:
                 self.manual_failures = data.get('manual_failures', 0)
                 self.last_failure_reason = data.get('last_failure_reason')
                 self.failure_reasons = data.get('failure_reasons', [])
+                self.last_observed_results = data.get('last_observed_results', {})
                 
                 # Parse datetime strings back to datetime objects
                 for field in ['last_run_time', 'last_success_time', 'last_failure_time', 
@@ -496,6 +521,7 @@ class SpeedTestTracker:
                 'manual_failures': self.manual_failures,
                 'last_failure_reason': self.last_failure_reason,
                 'failure_reasons': self.failure_reasons[-10:],  # Keep only last 10 failure reasons
+                'last_observed_results': self.last_observed_results,
             }
             
             # Convert datetime objects to ISO format strings
@@ -560,6 +586,53 @@ class SpeedTestTracker:
             _LOGGER.info(f"Manual speed test failure recorded. Total manual failures: {self.manual_failures}")
             
         _LOGGER.info(f"Total failed speed tests: {self.failed_runs}")
+
+    def observe_results(self, speed_test_data: dict) -> bool:
+        """Track newly completed tests, including tests scheduled by UniFi."""
+        if not isinstance(speed_test_data, dict):
+            return False
+
+        records = speed_test_data.get("wan_interfaces")
+        if not isinstance(records, list):
+            records = [speed_test_data]
+
+        current_results = {}
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            marker = record.get("id") or record.get("timestamp")
+            if marker is None:
+                continue
+            interface = record.get("interface_name") or record.get("interface") or "default"
+            group = record.get("wan_networkgroup") or record.get("wan_group") or "WAN"
+            current_results[f"{interface}_{group}"] = str(marker)
+
+        if not current_results:
+            return False
+
+        if not self.last_observed_results:
+            self.last_observed_results.update(current_results)
+            return True
+
+        has_new_result = any(
+            self.last_observed_results.get(key) != marker
+            for key, marker in current_results.items()
+        )
+        self.last_observed_results.update(current_results)
+
+        if not has_new_result:
+            return False
+
+        recently_recorded = (
+            self.last_success_time is not None
+            and datetime.now() - self.last_success_time < timedelta(minutes=10)
+        )
+        if not recently_recorded:
+            self.record_attempt(automated=True)
+            self.record_success(automated=True)
+            _LOGGER.info("Recorded speed test completed outside Home Assistant")
+
+        return True
     
     @property
     def success_rate(self):
@@ -579,10 +652,11 @@ class SpeedTestTracker:
 class UniFiSpeedTestSensor(CoordinatorEntity, SensorEntity):
     """Sensor for UniFi Speed Test measurements with long-term statistics support."""
     
-    def __init__(self, coordinator, name, data_key):
+    def __init__(self, coordinator, name, data_key, config_entry_id):
         super().__init__(coordinator)
         self._name = name
         self._data_key = data_key
+        self._config_entry_id = config_entry_id
         self._state = None
         
         # Validate data_key to prevent unit_of_measurement errors
@@ -597,7 +671,7 @@ class UniFiSpeedTestSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def unique_id(self) -> str:
-        return f"{DOMAIN}_{self._data_key}"
+        return f"{DOMAIN}_{self._data_key}_{self._config_entry_id}"
 
     @property
     def state(self) -> StateType:
@@ -652,7 +726,7 @@ class UniFiSpeedTestSensor(CoordinatorEntity, SensorEntity):
     def device_info(self):
         """Return device information about this entity."""
         info = {
-            "identifiers": {(DOMAIN, "unifi_speedtest")},
+            "identifiers": {(DOMAIN, f"unifi_speedtest_{self._config_entry_id}")},
             "name": INTEGRATION_NAME,
             "manufacturer": "UniFi"
         }
@@ -730,7 +804,7 @@ class UniFiSpeedTestSensorMultiWAN(CoordinatorEntity, SensorEntity):
 
     @property
     def unique_id(self) -> str:
-        return f"{DOMAIN}_{self._data_key}_{self._interface_name}_{self._wan_group}"
+        return f"{DOMAIN}_{self._data_key}_{self._interface_name}_{self._wan_group}_{self._config_entry_id}"
 
     @property
     def state(self) -> StateType:
@@ -850,20 +924,22 @@ class UniFiSpeedTestSensorMultiWAN(CoordinatorEntity, SensorEntity):
                 role = 'Primary WAN' if is_primary else 'Secondary WAN'
                 device_name = f"{INTEGRATION_NAME} {role} [{group} - {iface}]"
         return {
-            "identifiers": {(DOMAIN, f"unifi_speedtest_{iface}_{group}")},
+            "identifiers": {(DOMAIN, f"unifi_speedtest_{self._config_entry_id}_{iface}_{group}")},
             "name": device_name,
             "manufacturer": "UniFi",
             "model": f"WAN Interface {iface}"
         }
 
 
-class SpeedTestRunsSensor(SensorEntity):
+class SpeedTestRunsSensor(CoordinatorEntity, SensorEntity):
     """Sensor to track speed test execution statistics."""
     
-    def __init__(self, tracker: SpeedTestTracker, name: str):
+    def __init__(self, coordinator, tracker: SpeedTestTracker, name: str, config_entry_id: str):
+        super().__init__(coordinator)
         self._tracker = tracker
         self._name = name
-        self._attr_unique_id = f"{DOMAIN}_speedtest_runs"
+        self._config_entry_id = config_entry_id
+        self._attr_unique_id = f"{DOMAIN}_speedtest_runs_{config_entry_id}"
         self._attr_name = f"UniFi {name}"
 
     @property
@@ -913,7 +989,7 @@ class SpeedTestRunsSensor(SensorEntity):
     def device_info(self):
         """Return device information about this entity."""
         return {
-            "identifiers": {(DOMAIN, "unifi_speedtest")},
+            "identifiers": {(DOMAIN, f"unifi_speedtest_{self._config_entry_id}")},
             "name": INTEGRATION_NAME,
             "manufacturer": "UniFi"
         }
@@ -922,10 +998,11 @@ class SpeedTestRunsSensor(SensorEntity):
 class UniFiAPIHealthSensor(SensorEntity):
     """Sensor to monitor UniFi API health and rate limiting status."""
     
-    def __init__(self, api: UniFiAPIBase, name: str):
+    def __init__(self, api: UniFiOSAPI, name: str, config_entry_id: str):
         self._api = api
         self._name = name
-        self._attr_unique_id = f"{DOMAIN}_api_health"
+        self._config_entry_id = config_entry_id
+        self._attr_unique_id = f"{DOMAIN}_api_health_{config_entry_id}"
         self._attr_name = f"UniFi {name}"
         # Cache controller info at init to avoid blocking calls in properties
         self._controller_type = api.controller_type
@@ -980,7 +1057,7 @@ class UniFiAPIHealthSensor(SensorEntity):
     def device_info(self):
         """Return device information about this entity."""
         return {
-            "identifiers": {(DOMAIN, "unifi_speedtest")},
+            "identifiers": {(DOMAIN, f"unifi_speedtest_{self._config_entry_id}")},
             "name": INTEGRATION_NAME,
             "manufacturer": "UniFi"
         }
