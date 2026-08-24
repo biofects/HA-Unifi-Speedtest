@@ -2,12 +2,19 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 import voluptuous as vol
 import logging
 import asyncio
 
 from .const import DOMAIN, INTEGRATION_NAME, SERVICE_START_SPEED_TEST, SERVICE_GET_SPEED_TEST_STATUS, SERVICE_GET_WAN_INTERFACES, CONF_SCHEDULE_INTERVAL, CONF_ENABLE_SCHEDULING, CONF_ENABLE_MULTI_WAN, CONF_HAS_ADMIN, CONF_URL, CONF_API_KEY, CONF_SITE, CONF_VERIFY_SSL
 from .api import UniFiOSAPI
+from .registry import (
+    active_device_identifiers,
+    legacy_device_identifier_to_scoped,
+    wan_interface_from_sensor_unique_id,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -21,6 +28,69 @@ START_SPEED_TEST_SCHEMA = vol.Schema({
 GET_WAN_INTERFACES_SCHEMA = vol.Schema({
     vol.Optional("config_entry_id"): cv.string,
 })
+
+
+def _migrate_device_registry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reuse pre-v4 devices while adopting config-entry-scoped identifiers."""
+    device_registry = dr.async_get(hass)
+    entity_registry = er.async_get(hass)
+    devices = dr.async_entries_for_config_entry(device_registry, entry.entry_id)
+    devices_by_identifier = {
+        identifier: device
+        for device in devices
+        for identifier in device.identifiers
+        if identifier[0] == DOMAIN
+    }
+
+    for legacy_device in list(devices):
+        new_identifiers = set(legacy_device.identifiers)
+        changed = False
+
+        for legacy_identifier in list(legacy_device.identifiers):
+            if legacy_identifier[0] != DOMAIN:
+                continue
+            scoped_value = legacy_device_identifier_to_scoped(
+                legacy_identifier[1], entry.entry_id
+            )
+            if scoped_value is None:
+                continue
+
+            scoped_identifier = (DOMAIN, scoped_value)
+            duplicate = devices_by_identifier.get(scoped_identifier)
+            if duplicate is not None and duplicate.id != legacy_device.id:
+                for entity in er.async_entries_for_device(
+                    entity_registry,
+                    duplicate.id,
+                    include_disabled_entities=True,
+                ):
+                    entity_registry.async_update_entity(
+                        entity.entity_id, device_id=legacy_device.id
+                    )
+                if legacy_device.area_id is None and duplicate.area_id is not None:
+                    device_registry.async_update_device(
+                        legacy_device.id, area_id=duplicate.area_id
+                    )
+                device_registry.async_remove_device(duplicate.id)
+
+            new_identifiers.discard(legacy_identifier)
+            new_identifiers.add(scoped_identifier)
+            changed = True
+
+        if changed:
+            device_registry.async_update_device(
+                legacy_device.id, new_identifiers=new_identifiers
+            )
+            _LOGGER.info("Migrated device registry entry %s", legacy_device.id)
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate legacy device identifiers without losing device metadata."""
+    if entry.version > 2:
+        return False
+    if entry.version < 2:
+        _migrate_device_registry(hass, entry)
+        hass.config_entries.async_update_entry(entry, version=2)
+    return True
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up the HA Unifi Speedtest integration from a config entry."""
@@ -324,7 +394,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     # Clean up entities and devices for inactive WANs if show_inactive_wans is False
     try:
-        from homeassistant.helpers import entity_registry as er, device_registry as dr
         entity_registry = er.async_get(hass)
         device_registry = dr.async_get(hass)
         show_inactive_wans = entry.options.get("show_inactive_wans", False)
@@ -355,14 +424,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     devices_to_check = set()
                     
                     for entity in entities:
-                        # Extract WAN interface from unique_id (format: ha_unifi_speedtest_download_eth9_WAN)
-                        # Look for eth followed by a number
-                        wan_interface = None
-                        parts = entity.unique_id.split("_")
-                        for part in parts:
-                            if part.startswith("eth") and any(c.isdigit() for c in part):
-                                wan_interface = part
-                                break
+                        wan_interface = wan_interface_from_sensor_unique_id(
+                            entity.unique_id
+                        )
                         
                         if wan_interface and wan_interface not in active_wans:
                             _LOGGER.info(f"Removing inactive WAN entity: {entity.entity_id} (interface: {wan_interface})")
@@ -427,3 +491,18 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.warning("Failed to unload sensor platform.")
     
     return unload_ok
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, entry: ConfigEntry, device: dr.AnyDeviceEntry
+) -> bool:
+    """Allow users to remove devices no longer reported by the integration."""
+    coordinator = hass.data.get(DOMAIN, {}).get(f"{entry.entry_id}_coordinator")
+    coordinator_data = getattr(coordinator, "data", None)
+    active_identifiers = active_device_identifiers(entry.entry_id, coordinator_data)
+    domain_identifiers = {
+        identifier for identifier in device.identifiers if identifier[0] == DOMAIN
+    }
+    return bool(domain_identifiers) and domain_identifiers.isdisjoint(
+        active_identifiers
+    )

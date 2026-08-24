@@ -41,7 +41,7 @@ def calculate_polling_interval(schedule_interval: int) -> int:
 class UniFiSpeedTestConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for HA Unifi Speedtest."""
     
-    VERSION = 1
+    VERSION = 2
     
     @staticmethod
     @callback
