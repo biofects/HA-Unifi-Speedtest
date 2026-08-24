@@ -326,20 +326,19 @@ entities:
 
 ## 📦 What's New
 
-### v4.0.0 (Current) - August 23, 2026
-**Breaking Changes:**
-- UniFi OS is required on a hardware console or self-hosted UniFi OS Server
-- Local API-key authentication is required
-- Legacy standalone Network Application controllers are no longer supported
+### v4.1.0 (Current) - August 24, 2026
 
-**Changes:**
-- One-step configuration flow with no controller-type picker
-- One UniFi OS API path for all supported systems
-- Non-UniFi-OS endpoint fallbacks removed
+**Fixes:**
+- Preserves existing devices, area assignments, and user customizations when
+  upgrading from v3
+- Reconciles duplicate devices already created by v4.0.0
+- Cleans up inactive WAN entities for interface names such as `ppp0` and `wan0`
+- Enables manual removal of stale integration devices
 
 **See [CHANGELOG.md](CHANGELOG.md) for complete details.**
 
 ### Previous Versions
+- **v4.0.0** - UniFi OS API-key-only integration
 - **v2.2.0** - User-controlled controller type selection
 - **v2.1.1** - UDM Pro 404 error fixes
 - **v2.1.0** - Intelligent primary WAN detection

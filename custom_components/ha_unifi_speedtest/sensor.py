@@ -14,6 +14,7 @@ from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, Sen
 
 from .const import DOMAIN, INTEGRATION_NAME, CONF_SCHEDULE_INTERVAL, CONF_ENABLE_SCHEDULING, CONF_POLLING_INTERVAL, CONF_ENABLE_MULTI_WAN, CONF_HAS_ADMIN, CONF_RUN_SPEEDTEST_ON_STARTUP
 from .api import UniFiOSAPI
+from .registry import wan_interface_from_sensor_unique_id
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -278,17 +279,12 @@ async def async_setup_entry(
         
         # Remove entities for WANs that shouldn't exist
         for entity in entities:
-            # Check if this is a WAN-specific entity (has eth in unique_id)
-            if entity.platform == "sensor" and "_eth" in entity.unique_id:
-                # Extract interface name from unique_id (format: ha_unifi_speedtest_download_eth9_WAN)
-                parts = entity.unique_id.split("_")
-                for i, part in enumerate(parts):
-                    if part.startswith("eth"):
-                        interface_name = part
-                        if interface_name not in should_exist_wans:
-                            _LOGGER.debug(f"Removing entity {entity.entity_id} for inactive WAN {interface_name}")
-                            entity_reg.async_remove(entity.entity_id)
-                        break
+            if entity.platform != "sensor":
+                continue
+            interface_name = wan_interface_from_sensor_unique_id(entity.unique_id)
+            if interface_name and interface_name not in should_exist_wans:
+                _LOGGER.debug(f"Removing entity {entity.entity_id} for inactive WAN {interface_name}")
+                entity_reg.async_remove(entity.entity_id)
     else:
         _LOGGER.debug("Skipping entity cleanup - no coordinator data available yet (will cleanup on next update)")
 

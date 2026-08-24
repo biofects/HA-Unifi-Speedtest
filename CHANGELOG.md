@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [4.1.0] - 2026-08-24
+
+### Fixed
+
+- Migrates pre-v4 device identifiers in place so upgrades preserve device area,
+  labels, and user customizations instead of creating replacement devices.
+- Reconciles duplicates already created by v4.0.0 by moving their entities to
+  the legacy device record before removing the duplicate.
+- Detects inactive WAN entities from the unique ID format instead of assuming
+  interfaces are named `eth<N>`, adding support for names such as `ppp0` and
+  `wan0`.
+- Allows stale integration devices that are no longer reported by the
+  coordinator to be removed from Home Assistant's device registry.
+
 ## [4.0.0] - 2026-08-23
 
 ### Breaking changes
