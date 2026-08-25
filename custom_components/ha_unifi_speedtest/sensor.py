@@ -13,7 +13,11 @@ from homeassistant.helpers.storage import Store
 from homeassistant.components.sensor import SensorEntity, SensorDeviceClass, SensorStateClass
 
 from .const import DOMAIN, INTEGRATION_NAME, CONF_SCHEDULE_INTERVAL, CONF_ENABLE_SCHEDULING, CONF_POLLING_INTERVAL, CONF_ENABLE_MULTI_WAN, CONF_HAS_ADMIN, CONF_RUN_SPEEDTEST_ON_STARTUP
-from .api import UniFiOSAPI
+from .api import (
+    UniFiOSAPI,
+    speed_test_result_marker,
+    speed_test_result_marker_matches,
+)
 from .registry import wan_interface_from_sensor_unique_id
 
 _LOGGER = logging.getLogger(__name__)
@@ -593,15 +597,20 @@ class SpeedTestTracker:
             records = [speed_test_data]
 
         current_results = {}
+        matching_results = {}
         for record in records:
             if not isinstance(record, dict):
                 continue
-            marker = record.get("id") or record.get("timestamp")
+            marker = speed_test_result_marker(record)
             if marker is None:
                 continue
             interface = record.get("interface_name") or record.get("interface") or "default"
             group = record.get("wan_networkgroup") or record.get("wan_group") or "WAN"
-            current_results[f"{interface}_{group}"] = str(marker)
+            key = f"{interface}_{group}"
+            current_results[key] = marker
+            matching_results[key] = speed_test_result_marker_matches(
+                self.last_observed_results.get(key), record
+            )
 
         if not current_results:
             return False
@@ -610,10 +619,7 @@ class SpeedTestTracker:
             self.last_observed_results.update(current_results)
             return True
 
-        has_new_result = any(
-            self.last_observed_results.get(key) != marker
-            for key, marker in current_results.items()
-        )
+        has_new_result = any(not matches for matches in matching_results.values())
         self.last_observed_results.update(current_results)
 
         if not has_new_result:

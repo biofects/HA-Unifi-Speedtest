@@ -139,6 +139,47 @@ class UniFiOSSpeedTestTests(unittest.TestCase):
 
         self.assertEqual({}, self.api.get_wan_status_map())
 
+    def test_result_marker_changes_when_stable_id_gets_new_result(self):
+        previous = {
+            "id": "wan-result",
+            "timestamp": "2026-08-25T10:00:00",
+            "download": 900.0,
+            "upload": 100.0,
+            "ping": 8.0,
+        }
+        current = {
+            "id": "wan-result",
+            "timestamp": "2026-08-25T11:00:00",
+            "download": 925.0,
+            "upload": 105.0,
+            "ping": 7.0,
+        }
+
+        self.assertNotEqual(
+            api.speed_test_result_marker(previous),
+            api.speed_test_result_marker(current),
+        )
+
+    def test_result_marker_uses_measurements_without_timestamp(self):
+        previous = {"id": "wan-result", "download": 900.0}
+        current = {"id": "wan-result", "download": 925.0}
+
+        self.assertNotEqual(
+            api.speed_test_result_marker(previous),
+            api.speed_test_result_marker(current),
+        )
+
+    def test_result_marker_matches_legacy_stored_id(self):
+        current = {
+            "id": "wan-result",
+            "timestamp": "2026-08-25T11:00:00",
+            "download": 925.0,
+        }
+
+        self.assertTrue(
+            api.speed_test_result_marker_matches("wan-result", current)
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
