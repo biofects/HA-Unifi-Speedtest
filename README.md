@@ -326,7 +326,20 @@ entities:
 
 ## 📦 What's New
 
-### v4.1.0 (Current) - August 24, 2026
+### v4.1.1 (Current) - August 25, 2026
+
+**Fixes:**
+- Detects controller-initiated speed tests when UniFi reuses a result ID
+
+### Previous Versions
+- **v4.1.0** - Device registry migration and stale device cleanup
+- **v4.0.0** - UniFi OS API-key-only integration
+- **v2.2.0** - User-controlled controller type selection
+- **v2.1.1** - UDM Pro 404 error fixes
+- **v2.1.0** - Intelligent primary WAN detection
+- **v2.0.1** - Initial multi-WAN support
+
+### v4.1.0 - August 24, 2026
 
 **Fixes:**
 - Preserves existing devices, area assignments, and user customizations when
@@ -336,13 +349,6 @@ entities:
 - Enables manual removal of stale integration devices
 
 **See [CHANGELOG.md](CHANGELOG.md) for complete details.**
-
-### Previous Versions
-- **v4.0.0** - UniFi OS API-key-only integration
-- **v2.2.0** - User-controlled controller type selection
-- **v2.1.1** - UDM Pro 404 error fixes
-- **v2.1.0** - Intelligent primary WAN detection
-- **v2.0.1** - Initial multi-WAN support
 
 ## 🔧 Troubleshooting
 

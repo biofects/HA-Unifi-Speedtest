@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [4.1.1] - 2026-08-25
+
+### Fixed
+
+- Detects completed controller-initiated speed tests when UniFi reuses the
+  same result ID between runs.
+
 ## [4.1.0] - 2026-08-24
 
 ### Fixed

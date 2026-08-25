@@ -1,5 +1,6 @@
 """API client for UniFi OS controllers using API-key authentication."""
 from datetime import datetime
+import json
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -13,6 +14,31 @@ from urllib3.util.retry import Retry
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def speed_test_result_marker(result: dict) -> str | None:
+    """Return a stable marker that changes when a speed-test result changes."""
+    values = [
+        result.get("id"),
+        result.get("timestamp"),
+        result.get("download"),
+        result.get("upload"),
+        result.get("ping"),
+    ]
+    if all(value is None for value in values):
+        return None
+    return json.dumps(values, separators=(",", ":"), default=str)
+
+
+def speed_test_result_marker_matches(
+    stored_marker: str | None, result: dict
+) -> bool:
+    """Return whether a stored current or legacy marker matches a result."""
+    if stored_marker == speed_test_result_marker(result):
+        return True
+
+    legacy_value = result.get("id") or result.get("timestamp")
+    return legacy_value is not None and stored_marker == str(legacy_value)
 
 
 class UniFiOSAPI:
